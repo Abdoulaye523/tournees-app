@@ -21,18 +21,21 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100vh' }}>
-      {/* Left panel */}
+    <div style={{ display: 'flex', minHeight: '100vh' }}>
+
+      {/* ── Panneau gauche (caché sur mobile) ── */}
       <div style={{
         width: '320px',
+        flexShrink: 0,
         background: 'var(--navy)',
         display: 'flex',
         flexDirection: 'column',
         padding: '40px 36px',
         position: 'relative',
         overflow: 'hidden',
-        flexShrink: 0,
-      }}>
+      }}
+        className="login-left-panel"
+      >
         <div style={{
           position: 'absolute', top: '-100px', left: '-100px',
           width: '300px', height: '300px',
@@ -41,7 +44,10 @@ export default function LoginPage() {
         }} />
 
         <div style={{ marginBottom: 'auto' }}>
-          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '26px', fontWeight: 800, color: 'white', letterSpacing: '-0.5px', marginBottom: '4px' }}>
+          <h1 style={{
+            fontFamily: 'var(--font-display)', fontSize: '26px',
+            fontWeight: 800, color: 'white', letterSpacing: '-0.5px', marginBottom: '4px'
+          }}>
             CCV<span style={{ color: 'var(--accent)' }}>.</span>
           </h1>
           <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', letterSpacing: '1px', textTransform: 'uppercase' }}>
@@ -49,8 +55,11 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '8px', marginBottom: '48px' }}>
-          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 800, color: 'white', lineHeight: 1.2, marginBottom: '12px' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', marginBottom: '48px' }}>
+          <h2 style={{
+            fontFamily: 'var(--font-display)', fontSize: '28px',
+            fontWeight: 800, color: 'white', lineHeight: 1.2, marginBottom: '12px'
+          }}>
             Gérez vos <span style={{ color: 'var(--accent)' }}>tournées</span> efficacement.
           </h2>
           <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.45)', lineHeight: 1.6, marginBottom: '24px' }}>
@@ -75,17 +84,37 @@ export default function LoginPage() {
         </p>
       </div>
 
-      {/* Right panel */}
+      {/* ── Panneau droit (formulaire) ── */}
       <div style={{
         flex: 1,
         background: 'var(--gray-bg)',
         display: 'flex',
+        flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '40px',
+        padding: '24px 16px',
+        minHeight: '100vh',
       }}>
-        <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '40px' }}>
-          <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '22px', fontWeight: 700, color: 'var(--gray-800)', marginBottom: '6px' }}>
+
+        {/* Logo visible uniquement sur mobile */}
+        <div className="login-mobile-logo">
+          <div style={{
+            fontFamily: 'var(--font-display)', fontSize: '28px',
+            fontWeight: 800, color: 'var(--navy)', letterSpacing: '-0.5px',
+            marginBottom: '4px',
+          }}>
+            CCV<span style={{ color: 'var(--accent)' }}>.</span>
+          </div>
+          <div style={{ fontSize: '12px', color: 'var(--gray-400)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '32px' }}>
+            Contrôle des tournées
+          </div>
+        </div>
+
+        <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '36px 32px' }}>
+          <h3 style={{
+            fontFamily: 'var(--font-display)', fontSize: '22px',
+            fontWeight: 700, color: 'var(--gray-800)', marginBottom: '6px'
+          }}>
             Connexion
           </h3>
           <p style={{ fontSize: '14px', color: 'var(--gray-400)', marginBottom: '28px' }}>
@@ -103,6 +132,8 @@ export default function LoginPage() {
                 onChange={e => setEmail(e.target.value)}
                 required
                 autoFocus
+                autoCapitalize="none"
+                autoCorrect="off"
               />
             </div>
 
@@ -121,14 +152,18 @@ export default function LoginPage() {
             {error && (
               <div style={{
                 background: 'var(--red-light)', color: '#991b1b',
-                padding: '10px 14px', borderRadius: 'var(--radius-sm)',
-                fontSize: '13px',
+                padding: '10px 14px', borderRadius: 'var(--radius-sm)', fontSize: '13px',
               }}>
                 {error}
               </div>
             )}
 
-            <button type="submit" className="btn btn-primary btn-lg w-full" disabled={loading} style={{ marginTop: '4px', justifyContent: 'center' }}>
+            <button
+              type="submit"
+              className="btn btn-primary btn-lg w-full"
+              disabled={loading}
+              style={{ justifyContent: 'center', marginTop: '4px' }}
+            >
               {loading ? <div className="spinner" /> : '→ Se connecter'}
             </button>
           </form>
@@ -138,6 +173,20 @@ export default function LoginPage() {
           </p>
         </div>
       </div>
+
+      {/* ── Styles responsive login ── */}
+      <style>{`
+        .login-mobile-logo { display: none; }
+
+        @media (max-width: 768px) {
+          .login-left-panel { display: none !important; }
+          .login-mobile-logo { display: block; text-align: center; }
+        }
+
+        @media (max-width: 420px) {
+          .card { padding: 24px 20px !important; }
+        }
+      `}</style>
     </div>
   )
 }
