@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from './supabase'
 import { useAuth } from './AuthContext'
-import { ArrowLeft, Package, CheckCircle, AlertTriangle, Wifi, WifiOff } from 'lucide-react'
+import { ArrowLeft, Package, CheckCircle, Wifi, WifiOff, Keyboard } from 'lucide-react'
 
 const POPUP_DURATION = 2500
 
@@ -47,74 +47,66 @@ export default function ScanPage() {
   const [loading, setLoading] = useState(true)
   const [popup, setPopup] = useState(null)
   const [lastScans, setLastScans] = useState([])
-  const [inputValue, setInputValue] = useState('')
+  const [scanInput, setScanInput] = useState('')   // input TC51 invisible
+  const [manualInput, setManualInput] = useState('') // saisie manuelle
+  const [manualMode, setManualMode] = useState(false) // mode saisie manuelle actif
   const [online, setOnline] = useState(navigator.onLine)
 
-  const inputRef = useRef(null)
+  const scanInputRef = useRef(null)
+  const manualInputRef = useRef(null)
   const popupTimer = useRef(null)
   const bufferTimer = useRef(null)
 
-  // Surveiller la connexion réseau
+  // Connexion réseau
   useEffect(() => {
-    const onOnline = () => setOnline(true)
-    const onOffline = () => setOnline(false)
-    window.addEventListener('online', onOnline)
-    window.addEventListener('offline', onOffline)
-    return () => {
-      window.removeEventListener('online', onOnline)
-      window.removeEventListener('offline', onOffline)
-    }
+    const on = () => setOnline(true)
+    const off = () => setOnline(false)
+    window.addEventListener('online', on)
+    window.addEventListener('offline', off)
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
   }, [])
 
-  // Charger la tournée
-  useEffect(() => {
-    fetchTour()
-  }, [tourId])
+  // Chargement tournée
+  useEffect(() => { fetchTour() }, [tourId])
 
-  // Maintenir le focus sur l'input (TC51 envoie les caractères comme un clavier)
+  // Maintenir focus sur l'input TC51 quand on n'est pas en mode manuel
   useEffect(() => {
+    if (manualMode) return
     const keepFocus = () => {
-      if (document.activeElement !== inputRef.current) {
-        inputRef.current?.focus()
+      if (document.activeElement !== scanInputRef.current) {
+        scanInputRef.current?.focus()
       }
     }
     const interval = setInterval(keepFocus, 300)
-    inputRef.current?.focus()
+    scanInputRef.current?.focus()
     return () => clearInterval(interval)
-  }, [])
+  }, [manualMode])
 
-  // Écouter les scans en temps réel via Supabase realtime
+  // Focus sur l'input manuel quand on active le mode
+  useEffect(() => {
+    if (manualMode) {
+      setTimeout(() => manualInputRef.current?.focus(), 50)
+    }
+  }, [manualMode])
+
+  // Realtime scan events
   useEffect(() => {
     if (!tourId) return
     const channel = supabase
       .channel(`tour-${tourId}`)
       .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'scan_events',
+        event: 'INSERT', schema: 'public', table: 'scan_events',
         filter: `tour_id=eq.${tourId}`,
-      }, () => {
-        fetchSummary()
-      })
+      }, () => fetchSummary())
       .subscribe()
-
     return () => supabase.removeChannel(channel)
   }, [tourId])
 
   async function fetchTour() {
     const { data: tourData } = await supabase
-      .from('tours')
-      .select('*')
-      .eq('id', tourId)
-      .single()
-
+      .from('tours').select('*').eq('id', tourId).single()
     const { data: summaryData } = await supabase
-      .from('tour_scan_summary')
-      .select('*')
-      .eq('tour_id', tourId)
-      .single()
-
-    // Charger les derniers scans
+      .from('tour_scan_summary').select('*').eq('tour_id', tourId).single()
     const { data: recentScans } = await supabase
       .from('scan_events')
       .select('*, users(full_name)')
@@ -130,12 +122,8 @@ export default function ScanPage() {
 
   async function fetchSummary() {
     const { data } = await supabase
-      .from('tour_scan_summary')
-      .select('*')
-      .eq('tour_id', tourId)
-      .single()
+      .from('tour_scan_summary').select('*').eq('tour_id', tourId).single()
     setSummary(data)
-
     const { data: recentScans } = await supabase
       .from('scan_events')
       .select('*, users(full_name)')
@@ -145,33 +133,29 @@ export default function ScanPage() {
     setLastScans(recentScans || [])
   }
 
-  // Traitement du scan
+  // Traitement d'un barcode scanné ou saisi
   const processScan = useCallback(async (barcode) => {
-    if (!barcode || barcode.length < 5) return
+    const bc = barcode.trim()
+    if (!bc || bc.length < 5) return
 
-    // 1. Chercher le colis dans la base
     const { data: parcel } = await supabase
       .from('parcels')
       .select('*, tours(id, name)')
-      .eq('barcode', barcode)
+      .eq('barcode', bc)
       .single()
 
     let resultType
     let parcelId = null
 
     if (!parcel) {
-      // Colis complètement inconnu
       resultType = 'unknown'
     } else if (parcel.excluded) {
-      // Colis de type Reprise → traité comme inconnu (pas censé être là)
       resultType = 'unknown'
       parcelId = parcel.id
     } else if (parcel.tour_id !== tourId) {
-      // Colis connu mais mauvaise tournée
       resultType = 'wrong_tour'
       parcelId = parcel.id
     } else {
-      // Colis de la bonne tournée — vérifier s'il a déjà été scanné
       const { data: existingScan } = await supabase
         .from('scan_events')
         .select('id')
@@ -185,19 +169,15 @@ export default function ScanPage() {
       parcelId = parcel.id
     }
 
-    // 2. Enregistrer le scan en base
     await supabase.from('scan_events').insert({
       tour_id: tourId,
       parcel_id: parcelId,
       user_id: profile.id,
-      barcode_scanned: barcode,
+      barcode_scanned: bc,
       result_type: resultType,
     })
 
-    // 3. Afficher la popup
-    showPopup(resultType, barcode)
-
-    // 4. Rafraîchir le résumé
+    showPopup(resultType, bc)
     fetchSummary()
   }, [tourId, profile])
 
@@ -207,43 +187,59 @@ export default function ScanPage() {
     popupTimer.current = setTimeout(() => setPopup(null), POPUP_DURATION)
   }
 
-  // Gestion de l'input du TC51
-  // Le TC51 envoie les caractères un par un puis \n ou \r à la fin
-  function handleInputChange(e) {
+  // Gestion input TC51 (auto-détection sans Entrée)
+  function handleScanInput(e) {
     const val = e.target.value
-    setInputValue(val)
+    setScanInput(val)
 
-    // Détection auto : si le TC51 envoie un \n, on traite immédiatement
     if (val.includes('\n') || val.includes('\r')) {
-      const barcode = val.replace(/[\n\r]/g, '').trim()
-      if (barcode.length >= 5) {
-        processScan(barcode)
-        setInputValue('')
-      }
+      const bc = val.replace(/[\n\r]/g, '').trim()
+      if (bc.length >= 5) { processScan(bc); setScanInput('') }
       return
     }
 
-    // Sinon, on attend 150ms sans nouveau caractère (fin de scan rapide)
     if (bufferTimer.current) clearTimeout(bufferTimer.current)
     bufferTimer.current = setTimeout(() => {
-      const barcode = val.trim()
-      if (barcode.length >= 5) {
-        processScan(barcode)
-        setInputValue('')
-      }
+      const bc = val.trim()
+      if (bc.length >= 5) { processScan(bc); setScanInput('') }
     }, 150)
   }
 
-  function handleKeyDown(e) {
+  function handleScanKeyDown(e) {
     if (e.key === 'Enter') {
       e.preventDefault()
-      const barcode = inputValue.trim()
-      if (barcode.length >= 5) {
+      const bc = scanInput.trim()
+      if (bc.length >= 5) {
         if (bufferTimer.current) clearTimeout(bufferTimer.current)
-        processScan(barcode)
-        setInputValue('')
+        processScan(bc)
+        setScanInput('')
       }
     }
+  }
+
+  // Gestion saisie manuelle
+  function handleManualSubmit(e) {
+    e?.preventDefault()
+    const bc = manualInput.trim()
+    if (bc.length >= 5) {
+      processScan(bc)
+      setManualInput('')
+      // Remettre le focus sur l'input manuel pour enchaîner les saisies
+      manualInputRef.current?.focus()
+    }
+  }
+
+  function handleManualKeyDown(e) {
+    if (e.key === 'Enter') handleManualSubmit()
+    if (e.key === 'Escape') {
+      setManualMode(false)
+      setManualInput('')
+    }
+  }
+
+  function toggleManualMode() {
+    setManualMode(m => !m)
+    setManualInput('')
   }
 
   if (loading) return (
@@ -260,13 +256,14 @@ export default function ScanPage() {
 
   return (
     <div className="scan-page">
-      {/* Input invisible toujours focusé — reçoit les scans TC51 */}
+
+      {/* Input invisible TC51 */}
       <input
-        ref={inputRef}
+        ref={scanInputRef}
         className="scanner-input"
-        value={inputValue}
-        onChange={handleInputChange}
-        onKeyDown={handleKeyDown}
+        value={scanInput}
+        onChange={handleScanInput}
+        onKeyDown={handleScanKeyDown}
         autoComplete="off"
         autoCorrect="off"
         spellCheck={false}
@@ -274,7 +271,7 @@ export default function ScanPage() {
         aria-hidden="true"
       />
 
-      {/* Popup résultat scan */}
+      {/* Popup résultat */}
       {popup && (
         <div className={`scan-overlay ${SCAN_RESULTS[popup.type].cls}`}>
           <div className="scan-overlay-icon">{SCAN_RESULTS[popup.type].icon}</div>
@@ -295,37 +292,50 @@ export default function ScanPage() {
         <button className="btn btn-ghost btn-sm" onClick={() => navigate('/operator')}>
           <ArrowLeft size={15} /> Retour
         </button>
-        <div style={{ flex: 1 }}>
-          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '22px', fontWeight: 800, color: 'var(--gray-800)', letterSpacing: '-0.3px' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h2 style={{
+            fontFamily: 'var(--font-display)', fontSize: 'clamp(16px, 4vw, 22px)',
+            fontWeight: 800, color: 'var(--gray-800)', letterSpacing: '-0.3px',
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
             {tour?.name}
           </h2>
-          <p style={{ fontSize: '13px', color: 'var(--gray-400)' }}>
-            Contrôle en cours — scannez les colis
-          </p>
+          <p style={{ fontSize: '13px', color: 'var(--gray-400)' }}>Contrôle en cours</p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: online ? 'var(--green)' : 'var(--red)' }}>
-          {online ? <Wifi size={14} /> : <WifiOff size={14} />}
-          {online ? 'Connecté' : 'Hors ligne'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: online ? 'var(--green)' : 'var(--red)' }}>
+            {online ? <Wifi size={13} /> : <WifiOff size={13} />}
+            <span style={{ display: 'none' }}>{online ? 'En ligne' : 'Hors ligne'}</span>
+          </div>
+          <button
+            className={`btn btn-sm ${manualMode ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={toggleManualMode}
+            title="Saisie manuelle"
+          >
+            <Keyboard size={14} />
+            <span style={{ display: 'none' }}>Manuel</span>
+          </button>
         </div>
       </div>
 
-      {/* Compteurs principaux */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
+      {/* Compteurs */}
+      <div className="scan-counters">
+
         {/* Scannés */}
-        <div className="scan-counter" style={{ borderTop: `3px solid var(--accent)` }}>
+        <div className="scan-counter" style={{ borderTop: '3px solid var(--accent)' }}>
           <div>
             <span className="scan-counter-value">{scanned}</span>
             <span className="scan-counter-total"> / {total}</span>
           </div>
-          <div className="scan-counter-label">Colis scannés</div>
-          <div style={{ width: '100%', marginTop: '8px' }}>
+          <div className="scan-counter-label">Scannés</div>
+          <div style={{ width: '100%', marginTop: '6px' }}>
             <div className="progress-bar">
               <div
                 className={`progress-fill ${pct === 100 ? 'green' : ''}`}
                 style={{ width: `${pct}%` }}
               />
             </div>
-            <div style={{ fontSize: '12px', color: 'var(--gray-400)', marginTop: '4px', textAlign: 'right' }}>
+            <div style={{ fontSize: '11px', color: 'var(--gray-400)', marginTop: '3px', textAlign: 'right' }}>
               {pct}%
             </div>
           </div>
@@ -336,12 +346,8 @@ export default function ScanPage() {
           <div className="scan-counter-value" style={{ color: missing > 0 ? 'var(--red)' : 'var(--green)' }}>
             {missing}
           </div>
-          <div className="scan-counter-label">Colis manquants</div>
-          {missing === 0 && scanned > 0 && (
-            <div style={{ marginTop: '6px' }}>
-              <CheckCircle size={16} color="var(--green)" />
-            </div>
-          )}
+          <div className="scan-counter-label">Manquants</div>
+          {missing === 0 && scanned > 0 && <CheckCircle size={14} color="var(--green)" />}
         </div>
 
         {/* Anomalies */}
@@ -351,54 +357,85 @@ export default function ScanPage() {
           </div>
           <div className="scan-counter-label">Anomalies</div>
           {anomalies > 0 && (
-            <div style={{ fontSize: '11px', color: 'var(--gray-400)', marginTop: '4px' }}>
-              {summary?.wrong_tour_count || 0} mauvaise tournée · {summary?.unknown_count || 0} inconnus
+            <div style={{ fontSize: '10px', color: 'var(--gray-400)', textAlign: 'center', lineHeight: 1.3 }}>
+              {summary?.wrong_tour_count || 0} tournée · {summary?.unknown_count || 0} inconnus
             </div>
           )}
         </div>
       </div>
 
-      {/* Zone de scan visuelle */}
-      <div
-        style={{
+      {/* Zone de scan / saisie manuelle */}
+      {manualMode ? (
+        <div style={{
           background: 'var(--white)',
           borderRadius: 'var(--radius)',
-          border: '2px dashed var(--gray-200)',
-          padding: '24px',
-          textAlign: 'center',
-          cursor: 'text',
-          flex: 1,
+          border: '2px solid var(--accent)',
+          padding: '20px',
           display: 'flex',
           flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '8px',
-          transition: 'border-color 0.2s',
-          borderColor: popup ? SCAN_RESULTS[popup.type]?.color : undefined,
-        }}
-        onClick={() => inputRef.current?.focus()}
-      >
-        <Package size={32} color="var(--gray-200)" />
-        <p style={{ fontSize: '14px', color: 'var(--gray-400)', fontWeight: 500 }}>
-          Zone de scan active
-        </p>
-        <p style={{ fontSize: '12px', color: 'var(--gray-300)' }}>
-          Scannez un code-barres avec le TC51
-        </p>
-        {inputValue && (
-          <div style={{
-            marginTop: '8px', fontFamily: 'monospace', fontSize: '18px',
-            color: 'var(--accent)', fontWeight: 600, letterSpacing: '2px',
-          }}>
-            {inputValue}
+          gap: '12px',
+        }}>
+          <div style={{ fontSize: '13px', color: 'var(--accent)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Keyboard size={14} /> Saisie manuelle — tapez le numéro de colis et validez
           </div>
-        )}
-      </div>
+          <div className="manual-input-bar">
+            <input
+              ref={manualInputRef}
+              className="form-input"
+              value={manualInput}
+              onChange={e => setManualInput(e.target.value.replace(/\D/g, ''))}
+              onKeyDown={handleManualKeyDown}
+              placeholder="Ex: 5090186200001"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              autoComplete="off"
+              style={{ fontSize: '18px', fontFamily: 'monospace', letterSpacing: '1px', textAlign: 'center' }}
+            />
+            <button
+              className="btn btn-primary"
+              onClick={handleManualSubmit}
+              disabled={manualInput.trim().length < 5}
+              style={{ flexShrink: 0 }}
+            >
+              Valider
+            </button>
+          </div>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={toggleManualMode}
+            style={{ alignSelf: 'center', color: 'var(--gray-400)' }}
+          >
+            ← Retour au scan TC51
+          </button>
+        </div>
+      ) : (
+        <div
+          className="scan-zone"
+          style={{ borderColor: popup ? SCAN_RESULTS[popup.type]?.color : undefined }}
+          onClick={() => scanInputRef.current?.focus()}
+        >
+          <Package size={28} color="var(--gray-200)" />
+          <p style={{ fontSize: '14px', color: 'var(--gray-400)', fontWeight: 500 }}>
+            Zone de scan active
+          </p>
+          <p style={{ fontSize: '12px', color: 'var(--gray-300)' }}>
+            Scannez avec le TC51 ou utilisez le bouton clavier
+          </p>
+          {scanInput && (
+            <div style={{
+              marginTop: '8px', fontFamily: 'monospace', fontSize: '20px',
+              color: 'var(--accent)', fontWeight: 600, letterSpacing: '2px',
+            }}>
+              {scanInput}
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* Historique des derniers scans */}
+      {/* Historique */}
       {lastScans.length > 0 && (
-        <div className="card" style={{ maxHeight: '240px', overflow: 'hidden' }}>
-          <div className="card-header" style={{ padding: '14px 20px' }}>
+        <div className="card scan-history">
+          <div className="card-header" style={{ padding: '12px 16px' }}>
             <span className="card-title" style={{ fontSize: '13px' }}>Derniers scans</span>
           </div>
           <div style={{ overflowY: 'auto', maxHeight: '180px' }}>
@@ -408,23 +445,25 @@ export default function ScanPage() {
                   const r = SCAN_RESULTS[s.result_type]
                   return (
                     <tr key={s.id}>
-                      <td style={{ width: 28 }}>
+                      <td style={{ width: 32, paddingLeft: 12 }}>
                         <span style={{
                           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                           width: 22, height: 22, borderRadius: '50%',
                           background: r?.color + '20', color: r?.color,
-                          fontSize: '13px', fontWeight: 700,
+                          fontSize: '12px', fontWeight: 700,
                         }}>
                           {r?.icon}
                         </span>
                       </td>
                       <td>
-                        <code style={{ fontSize: '12px', color: 'var(--gray-600)' }}>{s.barcode_scanned}</code>
+                        <code style={{ fontSize: '12px', color: 'var(--gray-600)' }}>
+                          {s.barcode_scanned}
+                        </code>
                       </td>
-                      <td>
+                      <td style={{ display: 'none' }}>
                         <span style={{ fontSize: '12px', color: r?.color, fontWeight: 500 }}>{r?.label}</span>
                       </td>
-                      <td style={{ fontSize: '11px', color: 'var(--gray-400)', textAlign: 'right' }}>
+                      <td style={{ fontSize: '11px', color: 'var(--gray-400)', textAlign: 'right', paddingRight: 12 }}>
                         {new Date(s.scanned_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                       </td>
                     </tr>
