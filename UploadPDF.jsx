@@ -60,7 +60,7 @@ async function extractTextFromPDF(file) {
 function extractTourName(raw) {
   // Supprimer le préfixe ta830camion (toutes variantes de casse)
   // + éventuel caractère parasite unique après (ex: "m " dans "ta830camionm MNS75")
-  let name = raw.replace(/ta830camion[a-z]?\s*/i, '').trim()
+  let name = raw.replace(/ta830camion(m\s+)?/i, '').trim()
   // Normaliser les espaces multiples
   name = name.replace(/\s+/g, ' ').trim()
   return name
