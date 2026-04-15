@@ -75,7 +75,17 @@ export default function ScanPage() {
         .eq('tour_id', id)
         .single()
 
-      if (s) setSummary(s)
+      if (s) {
+        setSummary(prev => {
+          if (!prev) return s
+          // Ne jamais réduire le compteur de scans si la base n'est pas encore à jour
+          return {
+            ...s,
+            scanned_count: Math.max(s.scanned_count || 0, prev.scanned_count || 0),
+            missing_count: Math.min(s.missing_count || 0, prev.missing_count || 0),
+          }
+        })
+      }
 
       const { data: scans } = await supabase
         .from('scan_events')
@@ -179,8 +189,8 @@ export default function ScanPage() {
       setPopup({ type: resultType, barcode: bc })
       popupTimer.current = setTimeout(() => setPopup(null), POPUP_DURATION)
 
-      // Refresh depuis la base après 1s pour corriger si besoin
-      setTimeout(refreshData, 1000)
+      // Refresh depuis la base après 4s — laisse le temps au trigger Supabase de calculer la vue
+      setTimeout(refreshData, 4000)
 
     } catch (err) {
       console.error('processScan error:', err)
