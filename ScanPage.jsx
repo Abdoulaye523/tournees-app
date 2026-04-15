@@ -7,34 +7,10 @@ import { ArrowLeft, Package, CheckCircle, Wifi, WifiOff, Keyboard } from 'lucide
 const POPUP_DURATION = 2500
 
 const SCAN_RESULTS = {
-  ok: {
-    label: 'Colis conforme',
-    sub: 'Présent sur cette tournée',
-    cls: 'ok',
-    icon: '✓',
-    color: '#059669',
-  },
-  already_scanned: {
-    label: 'Colis déjà scanné',
-    sub: 'Ce colis a déjà été contrôlé',
-    cls: 'already',
-    icon: '↺',
-    color: '#2563eb',
-  },
-  unknown: {
-    label: 'Colis inconnu',
-    sub: 'Ce code-barres n\'est pas reconnu',
-    cls: 'unknown',
-    icon: '?',
-    color: '#d97706',
-  },
-  wrong_tour: {
-    label: 'Anomalie — mauvaise tournée',
-    sub: 'Ce colis appartient à une autre tournée',
-    cls: 'wrong',
-    icon: '⚠',
-    color: '#dc2626',
-  },
+  ok: { label: 'Colis conforme', sub: 'Présent sur cette tournée', cls: 'ok', icon: '✓', color: '#059669' },
+  already_scanned: { label: 'Colis déjà scanné', sub: 'Ce colis a déjà été contrôlé', cls: 'already', icon: '↺', color: '#2563eb' },
+  unknown: { label: 'Colis inconnu', sub: 'Code-barres non reconnu', cls: 'unknown', icon: '?', color: '#d97706' },
+  wrong_tour: { label: 'Mauvaise tournée', sub: 'Ce colis appartient à une autre tournée', cls: 'wrong', icon: '⚠', color: '#dc2626' },
 }
 
 export default function ScanPage() {
@@ -47,9 +23,9 @@ export default function ScanPage() {
   const [loading, setLoading] = useState(true)
   const [popup, setPopup] = useState(null)
   const [lastScans, setLastScans] = useState([])
-  const [scanInput, setScanInput] = useState('')   // input TC51 invisible
-  const [manualInput, setManualInput] = useState('') // saisie manuelle
-  const [manualMode, setManualMode] = useState(false) // mode saisie manuelle actif
+  const [scanInput, setScanInput] = useState('')
+  const [manualInput, setManualInput] = useState('')
+  const [manualMode, setManualMode] = useState(false)
   const [online, setOnline] = useState(navigator.onLine)
 
   const scanInputRef = useRef(null)
@@ -57,7 +33,6 @@ export default function ScanPage() {
   const popupTimer = useRef(null)
   const bufferTimer = useRef(null)
 
-  // Connexion réseau
   useEffect(() => {
     const on = () => setOnline(true)
     const off = () => setOnline(false)
@@ -66,119 +41,84 @@ export default function ScanPage() {
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
   }, [])
 
-  // Chargement tournée
   useEffect(() => { fetchTour() }, [tourId])
 
-  // Maintenir focus sur l'input TC51 quand on n'est pas en mode manuel
   useEffect(() => {
     if (manualMode) return
     const keepFocus = () => {
-      if (document.activeElement !== scanInputRef.current) {
-        scanInputRef.current?.focus()
-      }
+      if (document.activeElement !== scanInputRef.current) scanInputRef.current && scanInputRef.current.focus()
     }
     const interval = setInterval(keepFocus, 300)
-    scanInputRef.current?.focus()
+    scanInputRef.current && scanInputRef.current.focus()
     return () => clearInterval(interval)
   }, [manualMode])
 
-  // Focus sur l'input manuel quand on active le mode
   useEffect(() => {
-    if (manualMode) {
-      setTimeout(() => manualInputRef.current?.focus(), 50)
-    }
+    if (manualMode) setTimeout(() => manualInputRef.current && manualInputRef.current.focus(), 50)
   }, [manualMode])
 
-  // Realtime scan events
+  // Polling 3s pour actualiser les compteurs
+  useEffect(() => {
+    if (!tourId) return
+    const interval = setInterval(fetchSummary, 3000)
+    return () => clearInterval(interval)
+  }, [tourId])
+
+  // Realtime en complément
   useEffect(() => {
     if (!tourId) return
     const channel = supabase
-      .channel(`tour-${tourId}`)
-      .on('postgres_changes', {
-        event: 'INSERT', schema: 'public', table: 'scan_events',
-        filter: `tour_id=eq.${tourId}`,
-      }, () => fetchSummary())
+      .channel('scan-' + tourId)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'scan_events', filter: 'tour_id=eq.' + tourId }, fetchSummary)
       .subscribe()
     return () => supabase.removeChannel(channel)
   }, [tourId])
 
   async function fetchTour() {
-    const { data: tourData } = await supabase
-      .from('tours').select('*').eq('id', tourId).single()
-    const { data: summaryData } = await supabase
-      .from('tour_scan_summary').select('*').eq('tour_id', tourId).single()
-    const { data: recentScans } = await supabase
-      .from('scan_events')
-      .select('*, users(full_name)')
-      .eq('tour_id', tourId)
-      .order('scanned_at', { ascending: false })
-      .limit(10)
-
+    const { data: tourData } = await supabase.from('tours').select('*').eq('id', tourId).single()
     setTour(tourData)
-    setSummary(summaryData)
-    setLastScans(recentScans || [])
+    await fetchSummary()
     setLoading(false)
   }
 
   async function fetchSummary() {
-    const { data } = await supabase
-      .from('tour_scan_summary').select('*').eq('tour_id', tourId).single()
-    setSummary(data)
-    const { data: recentScans } = await supabase
-      .from('scan_events')
-      .select('*, users(full_name)')
-      .eq('tour_id', tourId)
-      .order('scanned_at', { ascending: false })
-      .limit(10)
-    setLastScans(recentScans || [])
+    const { data } = await supabase.from('tour_scan_summary').select('*').eq('tour_id', tourId).single()
+    if (data) setSummary(data)
+    const { data: scans } = await supabase
+      .from('scan_events').select('*, users(full_name)')
+      .eq('tour_id', tourId).order('scanned_at', { ascending: false }).limit(8)
+    if (scans) setLastScans(scans)
   }
 
-  // Traitement d'un barcode scanné ou saisi
   const processScan = useCallback(async (barcode) => {
     const bc = barcode.trim()
     if (!bc || bc.length < 5) return
 
-    const { data: parcel } = await supabase
-      .from('parcels')
-      .select('*, tours(id, name)')
-      .eq('barcode', bc)
-      .single()
+    const { data: parcel } = await supabase.from('parcels').select('*, tours(id, name)').eq('barcode', bc).single()
 
-    let resultType
-    let parcelId = null
+    let resultType, parcelId = null
 
     if (!parcel) {
       resultType = 'unknown'
     } else if (parcel.excluded) {
-      resultType = 'unknown'
-      parcelId = parcel.id
+      resultType = 'unknown'; parcelId = parcel.id
     } else if (parcel.tour_id !== tourId) {
-      resultType = 'wrong_tour'
-      parcelId = parcel.id
+      resultType = 'wrong_tour'; parcelId = parcel.id
     } else {
-      const { data: existingScan } = await supabase
-        .from('scan_events')
-        .select('id')
-        .eq('tour_id', tourId)
-        .eq('parcel_id', parcel.id)
-        .in('result_type', ['ok', 'already_scanned'])
-        .limit(1)
-        .single()
-
-      resultType = existingScan ? 'already_scanned' : 'ok'
+      const { data: existing } = await supabase
+        .from('scan_events').select('id').eq('tour_id', tourId).eq('parcel_id', parcel.id)
+        .in('result_type', ['ok', 'already_scanned']).limit(1).single()
+      resultType = existing ? 'already_scanned' : 'ok'
       parcelId = parcel.id
     }
 
     await supabase.from('scan_events').insert({
-      tour_id: tourId,
-      parcel_id: parcelId,
-      user_id: profile.id,
-      barcode_scanned: bc,
-      result_type: resultType,
+      tour_id: tourId, parcel_id: parcelId, user_id: profile.id,
+      barcode_scanned: bc, result_type: resultType,
     })
 
     showPopup(resultType, bc)
-    fetchSummary()
+    await fetchSummary()
   }, [tourId, profile])
 
   function showPopup(type, barcode) {
@@ -187,17 +127,14 @@ export default function ScanPage() {
     popupTimer.current = setTimeout(() => setPopup(null), POPUP_DURATION)
   }
 
-  // Gestion input TC51 (auto-détection sans Entrée)
   function handleScanInput(e) {
     const val = e.target.value
     setScanInput(val)
-
     if (val.includes('\n') || val.includes('\r')) {
       const bc = val.replace(/[\n\r]/g, '').trim()
       if (bc.length >= 5) { processScan(bc); setScanInput('') }
       return
     }
-
     if (bufferTimer.current) clearTimeout(bufferTimer.current)
     bufferTimer.current = setTimeout(() => {
       const bc = val.trim()
@@ -209,271 +146,239 @@ export default function ScanPage() {
     if (e.key === 'Enter') {
       e.preventDefault()
       const bc = scanInput.trim()
-      if (bc.length >= 5) {
-        if (bufferTimer.current) clearTimeout(bufferTimer.current)
-        processScan(bc)
-        setScanInput('')
-      }
+      if (bc.length >= 5) { if (bufferTimer.current) clearTimeout(bufferTimer.current); processScan(bc); setScanInput('') }
     }
   }
 
-  // Gestion saisie manuelle
-  function handleManualSubmit(e) {
-    e?.preventDefault()
+  function handleManualSubmit() {
     const bc = manualInput.trim()
-    if (bc.length >= 5) {
-      processScan(bc)
-      setManualInput('')
-      // Remettre le focus sur l'input manuel pour enchaîner les saisies
-      manualInputRef.current?.focus()
-    }
+    if (bc.length >= 5) { processScan(bc); setManualInput(''); manualInputRef.current && manualInputRef.current.focus() }
   }
 
-  function handleManualKeyDown(e) {
-    if (e.key === 'Enter') handleManualSubmit()
-    if (e.key === 'Escape') {
-      setManualMode(false)
-      setManualInput('')
-    }
-  }
+  if (loading) return <div className="loading-center" style={{ height: '100%' }}><div className="spinner dark" /></div>
 
-  function toggleManualMode() {
-    setManualMode(m => !m)
-    setManualInput('')
-  }
-
-  if (loading) return (
-    <div className="loading-center" style={{ height: '100%' }}>
-      <div className="spinner dark" />
-    </div>
-  )
-
-  const scanned = summary?.scanned_count || 0
-  const total = summary?.total_parcels || 0
-  const missing = summary?.missing_count || 0
-  const anomalies = (summary?.wrong_tour_count || 0) + (summary?.unknown_count || 0)
+  const scanned = summary ? summary.scanned_count : 0
+  const total = summary ? summary.total_parcels : 0
+  const missing = summary ? summary.missing_count : 0
+  const anomalies = summary ? (summary.wrong_tour_count + summary.unknown_count) : 0
   const pct = total > 0 ? Math.round((scanned / total) * 100) : 0
 
   return (
-    <div className="scan-page">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', boxSizing: 'border-box' }}>
 
       {/* Input invisible TC51 */}
       <input
         ref={scanInputRef}
-        className="scanner-input"
+        style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 1, height: 1 }}
         value={scanInput}
         onChange={handleScanInput}
         onKeyDown={handleScanKeyDown}
         autoComplete="off"
         autoCorrect="off"
         spellCheck={false}
+        inputMode="none"
         tabIndex={-1}
         aria-hidden="true"
       />
 
-      {/* Popup résultat */}
+      {/* Popup */}
       {popup && (
-        <div className={`scan-overlay ${SCAN_RESULTS[popup.type].cls}`}>
-          <div className="scan-overlay-icon">{SCAN_RESULTS[popup.type].icon}</div>
+        <div className={'scan-overlay ' + SCAN_RESULTS[popup.type].cls}>
+          <div style={{ fontSize: 24, flexShrink: 0 }}>{SCAN_RESULTS[popup.type].icon}</div>
           <div>
             <div className="scan-overlay-title">{SCAN_RESULTS[popup.type].label}</div>
             <div className="scan-overlay-sub">
               {SCAN_RESULTS[popup.type].sub}
-              <span style={{ display: 'block', opacity: 0.7, fontSize: '11px', marginTop: '2px', fontFamily: 'monospace' }}>
-                {popup.barcode}
-              </span>
+              <span style={{ display: 'block', opacity: 0.7, fontSize: 11, marginTop: 2, fontFamily: 'monospace' }}>{popup.barcode}</span>
             </div>
           </div>
         </div>
       )}
 
-      {/* Header */}
-      <div className="scan-header">
-        <button className="btn btn-ghost btn-sm" onClick={() => navigate('/operator')}>
-          <ArrowLeft size={15} /> Retour
+      {/* ── HEADER compact ── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '10px 14px',
+        background: 'var(--white)',
+        borderBottom: '1px solid var(--gray-100)',
+        flexShrink: 0,
+      }}>
+        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => navigate('/operator')}>
+          <ArrowLeft size={16} />
         </button>
+
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h2 style={{
-            fontFamily: 'var(--font-display)', fontSize: 'clamp(16px, 4vw, 22px)',
-            fontWeight: 800, color: 'var(--gray-800)', letterSpacing: '-0.3px',
+          <div style={{
+            fontFamily: 'var(--font-display)', fontWeight: 800,
+            fontSize: 'clamp(13px, 3.5vw, 18px)',
+            color: 'var(--gray-800)',
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}>
-            {tour?.name}
-          </h2>
-          <p style={{ fontSize: '13px', color: 'var(--gray-400)' }}>Contrôle en cours</p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: online ? 'var(--green)' : 'var(--red)' }}>
-            {online ? <Wifi size={13} /> : <WifiOff size={13} />}
-            <span style={{ display: 'none' }}>{online ? 'En ligne' : 'Hors ligne'}</span>
+            {tour && tour.name}
           </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {online ? <Wifi size={13} color="var(--green)" /> : <WifiOff size={13} color="var(--red)" />}
           <button
-            className={`btn btn-sm ${manualMode ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={toggleManualMode}
+            className={'btn btn-sm ' + (manualMode ? 'btn-primary' : 'btn-secondary')}
+            style={{ padding: '5px 8px' }}
+            onClick={() => { setManualMode(!manualMode); setManualInput('') }}
             title="Saisie manuelle"
           >
             <Keyboard size={14} />
-            <span style={{ display: 'none' }}>Manuel</span>
           </button>
         </div>
       </div>
 
-      {/* Compteurs */}
-      <div className="scan-counters">
+      {/* ── CONTENU ── */}
+      <div style={{ flex: 1, padding: '14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-        {/* Scannés */}
-        <div className="scan-counter" style={{ borderTop: '3px solid var(--accent)' }}>
-          <div>
-            <span className="scan-counter-value">{scanned}</span>
-            <span className="scan-counter-total"> / {total}</span>
+        {/* Compteurs */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+
+          {/* Scannés */}
+          <div style={{
+            background: 'var(--white)', borderRadius: 'var(--radius)',
+            border: '1px solid var(--gray-200)', borderTop: '3px solid var(--accent)',
+            padding: '12px 8px', textAlign: 'center', boxShadow: 'var(--shadow-sm)',
+          }}>
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 'clamp(22px, 6vw, 38px)', lineHeight: 1, color: 'var(--gray-800)' }}>
+              {scanned}
+              <span style={{ fontSize: 'clamp(11px, 3vw, 16px)', color: 'var(--gray-300)', fontWeight: 400 }}>/{total}</span>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--gray-400)', margin: '4px 0' }}>Scannés</div>
+            <div style={{ height: 4, background: 'var(--gray-100)', borderRadius: 100, overflow: 'hidden' }}>
+              <div style={{ height: '100%', background: pct === 100 ? 'var(--green)' : 'var(--accent)', width: pct + '%', transition: 'width 0.4s', borderRadius: 100 }} />
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--gray-400)', marginTop: 2 }}>{pct}%</div>
           </div>
-          <div className="scan-counter-label">Scannés</div>
-          <div style={{ width: '100%', marginTop: '6px' }}>
-            <div className="progress-bar">
-              <div
-                className={`progress-fill ${pct === 100 ? 'green' : ''}`}
-                style={{ width: `${pct}%` }}
-              />
+
+          {/* Manquants */}
+          <div style={{
+            background: 'var(--white)', borderRadius: 'var(--radius)',
+            border: '1px solid var(--gray-200)', borderTop: '3px solid ' + (missing > 0 ? 'var(--red)' : 'var(--green)'),
+            padding: '12px 8px', textAlign: 'center', boxShadow: 'var(--shadow-sm)',
+          }}>
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 'clamp(22px, 6vw, 38px)', lineHeight: 1, color: missing > 0 ? 'var(--red)' : 'var(--green)' }}>
+              {missing}
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--gray-400)', marginTop: '3px', textAlign: 'right' }}>
-              {pct}%
+            <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 4 }}>Manquants</div>
+            {missing === 0 && scanned > 0 && <div style={{ marginTop: 4 }}><CheckCircle size={13} color="var(--green)" /></div>}
+          </div>
+
+          {/* Anomalies */}
+          <div style={{
+            background: 'var(--white)', borderRadius: 'var(--radius)',
+            border: '1px solid var(--gray-200)', borderTop: '3px solid ' + (anomalies > 0 ? 'var(--orange)' : 'var(--gray-200)'),
+            padding: '12px 8px', textAlign: 'center', boxShadow: 'var(--shadow-sm)',
+          }}>
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 'clamp(22px, 6vw, 38px)', lineHeight: 1, color: anomalies > 0 ? 'var(--orange)' : 'var(--gray-300)' }}>
+              {anomalies}
             </div>
+            <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 4 }}>Anomalies</div>
           </div>
         </div>
 
-        {/* Manquants */}
-        <div className="scan-counter" style={{ borderTop: `3px solid ${missing > 0 ? 'var(--red)' : 'var(--green)'}` }}>
-          <div className="scan-counter-value" style={{ color: missing > 0 ? 'var(--red)' : 'var(--green)' }}>
-            {missing}
-          </div>
-          <div className="scan-counter-label">Manquants</div>
-          {missing === 0 && scanned > 0 && <CheckCircle size={14} color="var(--green)" />}
-        </div>
-
-        {/* Anomalies */}
-        <div className="scan-counter" style={{ borderTop: `3px solid ${anomalies > 0 ? 'var(--orange)' : 'var(--gray-200)'}` }}>
-          <div className="scan-counter-value" style={{ color: anomalies > 0 ? 'var(--orange)' : 'var(--gray-300)' }}>
-            {anomalies}
-          </div>
-          <div className="scan-counter-label">Anomalies</div>
-          {anomalies > 0 && (
-            <div style={{ fontSize: '10px', color: 'var(--gray-400)', textAlign: 'center', lineHeight: 1.3 }}>
-              {summary?.wrong_tour_count || 0} tournée · {summary?.unknown_count || 0} inconnus
+        {/* Zone scan / saisie manuelle */}
+        {manualMode ? (
+          <div style={{
+            background: 'var(--white)', borderRadius: 'var(--radius)',
+            border: '2px solid var(--accent)', padding: '14px',
+            display: 'flex', flexDirection: 'column', gap: 10,
+          }}>
+            <div style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Keyboard size={13} /> Saisie manuelle du numéro de colis
             </div>
-          )}
-        </div>
-      </div>
-
-      {/* Zone de scan / saisie manuelle */}
-      {manualMode ? (
-        <div style={{
-          background: 'var(--white)',
-          borderRadius: 'var(--radius)',
-          border: '2px solid var(--accent)',
-          padding: '20px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '12px',
-        }}>
-          <div style={{ fontSize: '13px', color: 'var(--accent)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Keyboard size={14} /> Saisie manuelle — tapez le numéro de colis et validez
-          </div>
-          <div className="manual-input-bar">
             <input
               ref={manualInputRef}
               className="form-input"
               value={manualInput}
               onChange={e => setManualInput(e.target.value.replace(/\D/g, ''))}
-              onKeyDown={handleManualKeyDown}
+              onKeyDown={e => {
+                if (e.key === 'Enter') handleManualSubmit()
+                if (e.key === 'Escape') { setManualMode(false); setManualInput('') }
+              }}
               placeholder="Ex: 5090186200001"
               inputMode="numeric"
               pattern="[0-9]*"
               autoComplete="off"
-              style={{ fontSize: '18px', fontFamily: 'monospace', letterSpacing: '1px', textAlign: 'center' }}
+              style={{ fontSize: 18, fontFamily: 'monospace', letterSpacing: 1, textAlign: 'center' }}
             />
             <button
-              className="btn btn-primary"
+              className="btn btn-primary w-full"
               onClick={handleManualSubmit}
               disabled={manualInput.trim().length < 5}
-              style={{ flexShrink: 0 }}
+              style={{ justifyContent: 'center' }}
             >
               Valider
             </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => { setManualMode(false); setManualInput('') }}
+              style={{ alignSelf: 'center', color: 'var(--gray-400)', fontSize: 12 }}
+            >
+              ← Retour au scan TC51
+            </button>
           </div>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={toggleManualMode}
-            style={{ alignSelf: 'center', color: 'var(--gray-400)' }}
+        ) : (
+          <div
+            style={{
+              background: 'var(--white)', borderRadius: 'var(--radius)',
+              border: '2px dashed ' + (popup ? SCAN_RESULTS[popup.type].color : 'var(--gray-200)'),
+              padding: '20px 16px', textAlign: 'center', cursor: 'text',
+              display: 'flex', flexDirection: 'column', alignItems: 'center',
+              justifyContent: 'center', gap: 6, minHeight: 90,
+              transition: 'border-color 0.2s',
+            }}
+            onClick={() => scanInputRef.current && scanInputRef.current.focus()}
           >
-            ← Retour au scan TC51
-          </button>
-        </div>
-      ) : (
-        <div
-          className="scan-zone"
-          style={{ borderColor: popup ? SCAN_RESULTS[popup.type]?.color : undefined }}
-          onClick={() => scanInputRef.current?.focus()}
-        >
-          <Package size={28} color="var(--gray-200)" />
-          <p style={{ fontSize: '14px', color: 'var(--gray-400)', fontWeight: 500 }}>
-            Zone de scan active
-          </p>
-          <p style={{ fontSize: '12px', color: 'var(--gray-300)' }}>
-            Scannez avec le TC51 ou utilisez le bouton clavier
-          </p>
-          {scanInput && (
-            <div style={{
-              marginTop: '8px', fontFamily: 'monospace', fontSize: '20px',
-              color: 'var(--accent)', fontWeight: 600, letterSpacing: '2px',
-            }}>
-              {scanInput}
-            </div>
-          )}
-        </div>
-      )}
+            <Package size={22} color="var(--gray-200)" />
+            <p style={{ fontSize: 13, color: 'var(--gray-400)', fontWeight: 500, margin: 0 }}>Zone de scan active</p>
+            <p style={{ fontSize: 11, color: 'var(--gray-300)', margin: 0 }}>Scannez avec le TC51</p>
+            {scanInput && (
+              <div style={{ fontFamily: 'monospace', fontSize: 18, color: 'var(--accent)', fontWeight: 600, letterSpacing: 2 }}>
+                {scanInput}
+              </div>
+            )}
+          </div>
+        )}
 
-      {/* Historique */}
-      {lastScans.length > 0 && (
-        <div className="card scan-history">
-          <div className="card-header" style={{ padding: '12px 16px' }}>
-            <span className="card-title" style={{ fontSize: '13px' }}>Derniers scans</span>
+        {/* Historique */}
+        {lastScans.length > 0 && (
+          <div className="card" style={{ overflow: 'hidden', flex: 1 }}>
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--gray-100)' }}>
+              <span style={{ fontFamily: 'var(--font-display)', fontSize: 12, fontWeight: 600, color: 'var(--gray-700)' }}>
+                Derniers scans
+              </span>
+            </div>
+            <div style={{ overflowY: 'auto' }}>
+              {lastScans.map(s => {
+                const r = SCAN_RESULTS[s.result_type]
+                return (
+                  <div key={s.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '7px 12px', borderBottom: '1px solid var(--gray-100)',
+                  }}>
+                    <span style={{
+                      width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+                      background: r ? r.color + '20' : '#eee', color: r ? r.color : '#999',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 10, fontWeight: 700,
+                    }}>
+                      {r && r.icon}
+                    </span>
+                    <code style={{ fontSize: 12, color: 'var(--gray-600)', flex: 1 }}>{s.barcode_scanned}</code>
+                    <span style={{ fontSize: 10, color: 'var(--gray-400)', flexShrink: 0 }}>
+                      {new Date(s.scanned_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
           </div>
-          <div style={{ overflowY: 'auto', maxHeight: '180px' }}>
-            <table>
-              <tbody>
-                {lastScans.map(s => {
-                  const r = SCAN_RESULTS[s.result_type]
-                  return (
-                    <tr key={s.id}>
-                      <td style={{ width: 32, paddingLeft: 12 }}>
-                        <span style={{
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          width: 22, height: 22, borderRadius: '50%',
-                          background: r?.color + '20', color: r?.color,
-                          fontSize: '12px', fontWeight: 700,
-                        }}>
-                          {r?.icon}
-                        </span>
-                      </td>
-                      <td>
-                        <code style={{ fontSize: '12px', color: 'var(--gray-600)' }}>
-                          {s.barcode_scanned}
-                        </code>
-                      </td>
-                      <td style={{ display: 'none' }}>
-                        <span style={{ fontSize: '12px', color: r?.color, fontWeight: 500 }}>{r?.label}</span>
-                      </td>
-                      <td style={{ fontSize: '11px', color: 'var(--gray-400)', textAlign: 'right', paddingRight: 12 }}>
-                        {new Date(s.scanned_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
