@@ -5,88 +5,137 @@ import { Upload, FileText, CheckCircle, AlertCircle, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 // ─── PDF PARSER ───────────────────────────────────────────────────────────────
-// Parse le texte brut extrait du PDF pour en tirer tournées + colis.
-// Stratégie : on utilise l'API Claude vision via Anthropic pour OCR/parsing
-// car le PDF est text-based, on peut l'envoyer directement.
 
-async function parsePDFText(text) {
-  const lines = text.split('\n')
+async function extractTextFromPDF(file) {
+  // Utilise pdf.js via CDN pour extraire le texte correctement
+  const pdfjsLib = await loadPdfJs()
+
+  const arrayBuffer = await file.arrayBuffer()
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+
+  let fullText = ''
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i)
+    const content = await page.getTextContent()
+
+    // Reconstituer les lignes en tenant compte des positions Y
+    const items = content.items
+    let lastY = null
+    let line = ''
+
+    for (const item of items) {
+      const y = item.transform[5]
+      if (lastY !== null && Math.abs(y - lastY) > 2) {
+        fullText += line + '\n'
+        line = item.str
+      } else {
+        line += item.str
+      }
+      lastY = y
+    }
+    if (line) fullText += line + '\n'
+    fullText += '\f' // séparateur de page
+  }
+
+  return fullText
+}
+
+function loadPdfJs() {
+  return new Promise((resolve, reject) => {
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+      return resolve(window.pdfjsLib)
+    }
+    const script = document.createElement('script')
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'
+    script.onload = () => {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+      resolve(window.pdfjsLib)
+    }
+    script.onerror = reject
+    document.head.appendChild(script)
+  })
+}
+
+function parsePDFText(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
   const tours = {}
   let currentTourName = null
-  let inChargementSection = false
+  let inChargement = false
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim()
+    const line = lines[i]
 
-    // Détection du nom de tournée : ligne contenant "CAMION" ou "camion"
+    // Détection tournée : ligne contenant CAMION (insensible casse)
     const tourMatch = line.match(/TOURNEE\s+TA830(?:CAMION|camion)(.+)/i)
     if (tourMatch) {
-      // Nettoie le nom : prend la partie après CAMION
-      let rawName = tourMatch[1].trim()
-      // Supprime les infos après un espace si trop long (départements, zones)
-      // On garde le nom brut complet comme clé
-      currentTourName = rawName
-
+      currentTourName = tourMatch[1].trim()
       if (!tours[currentTourName]) {
-        tours[currentTourName] = {
-          name: currentTourName,
-          parcels: [],
-          excluded: [],
-          inChargement: false,
-        }
+        tours[currentTourName] = { name: currentTourName, parcels: [], excluded: [] }
       }
-      inChargementSection = false
+      inChargement = false
       continue
     }
 
-    // Cas particulier : nom de tournée sur ligne suivante (MNS1alfortville)
-    if (line.match(/^ta830camion/i) && !line.includes('TOURNEE')) {
-      const rawName = line.replace(/^ta830camion/i, '').trim()
-      currentTourName = rawName
+    // Cas MNS1 : nom sur ligne séparée
+    const camionLine = line.match(/^ta830camion(.+)/i)
+    if (camionLine && !line.toUpperCase().includes('TOURNEE')) {
+      currentTourName = camionLine[1].trim()
       if (!tours[currentTourName]) {
-        tours[currentTourName] = { name: currentTourName, parcels: [], excluded: [], inChargement: false }
+        tours[currentTourName] = { name: currentTourName, parcels: [], excluded: [] }
       }
       continue
     }
 
     if (!currentTourName) continue
 
-    // Détecter section CHARGEMENT (on veut uniquement cette section)
+    // Section CHARGEMENT → on parse
     if (line === 'CHARGEMENT') {
-      inChargementSection = true
-      tours[currentTourName].inChargement = true
+      inChargement = true
       continue
     }
 
-    // Détecter section LIVRAISON → arrêter de parser cette tournée
-    if (line === 'LIVRAISON' && inChargementSection) {
-      inChargementSection = false
+    // Section LIVRAISON → on arrête pour cette tournée
+    if (line === 'LIVRAISON' && inChargement) {
+      inChargement = false
       currentTourName = null
       continue
     }
 
-    if (!inChargementSection) continue
+    if (!inChargement) continue
 
-    // Détecter type de prestation "Reprise"
-    if (line.startsWith('Type prestation') && line.includes('Reprise')) {
-      // Le colis précédent est une Reprise → on le marque
-      if (tours[currentTourName].parcels.length > 0) {
-        const last = tours[currentTourName].parcels.pop()
-        tours[currentTourName].excluded.push({ ...last, exclusionReason: 'Reprise' })
+    // Nouvelle page → reset si on tombe sur une nouvelle tournée
+    if (line === '\f') continue
+
+    // Détecter type Reprise sur la ligne suivante du colis
+    if (line.match(/Type\s+prestation/i) && line.includes('Reprise')) {
+      // Marquer le dernier colis comme exclu
+      const t = tours[currentTourName]
+      if (t.parcels.length > 0) {
+        const last = t.parcels.pop()
+        t.excluded.push({ ...last, exclusionReason: 'Reprise' })
       }
       continue
     }
 
-    // Détecter un numéro de colis : nombre de 9-15 chiffres en fin de ligne
-    // Le numéro est toujours le dernier élément sur la ligne du client
+    // Détection barcode : 9 à 15 chiffres en fin de ligne (ou seul sur la ligne)
     const barcodeMatch = line.match(/(\d{9,15})\s*$/)
-    if (barcodeMatch && !line.startsWith('Type') && !line.startsWith('Référence') && !line.startsWith('Créneau')) {
+    if (
+      barcodeMatch &&
+      !line.match(/^Type\s+prestation/i) &&
+      !line.match(/^Référence/i) &&
+      !line.match(/^Créneau/i) &&
+      !line.match(/^Quantité/i) &&
+      !line.match(/^\d{2}:\d{2}/) // pas une heure
+    ) {
       const barcode = barcodeMatch[1]
-      // Éviter les doublons dans la même tournée
-      const alreadyIn = tours[currentTourName].parcels.some(p => p.barcode === barcode)
-        || tours[currentTourName].excluded.some(p => p.barcode === barcode)
-      if (!alreadyIn) {
-        tours[currentTourName].parcels.push({ barcode })
+      const t = tours[currentTourName]
+      const exists = t.parcels.some(p => p.barcode === barcode)
+        || t.excluded.some(p => p.barcode === barcode)
+      if (!exists) {
+        t.parcels.push({ barcode })
       }
     }
   }
@@ -105,7 +154,6 @@ export default function UploadPDF() {
   const [dragover, setDragover] = useState(false)
   const inputRef = useRef()
 
-  // Date par défaut = demain (contrôle J-1)
   const tomorrow = new Date()
   tomorrow.setDate(tomorrow.getDate() + 1)
   const tomorrowStr = tomorrow.toISOString().split('T')[0]
@@ -124,7 +172,7 @@ export default function UploadPDF() {
     setResult(null)
 
     try {
-      // 1. Uploader le PDF dans Supabase Storage
+      // 1. Upload Storage
       setProgress('Envoi du fichier...')
       const path = `${deliveryDate}/${Date.now()}_${file.name}`
       const { error: uploadError } = await supabase.storage
@@ -132,7 +180,7 @@ export default function UploadPDF() {
         .upload(path, file)
       if (uploadError) throw new Error('Erreur upload : ' + uploadError.message)
 
-      // 2. Créer ou récupérer la delivery_date
+      // 2. Delivery date
       setProgress('Création de la date de livraison...')
       const { data: dateData, error: dateError } = await supabase
         .from('delivery_dates')
@@ -141,8 +189,8 @@ export default function UploadPDF() {
         .single()
       if (dateError) throw new Error('Erreur date : ' + dateError.message)
 
-      // 3. Enregistrer l'upload
-      const { data: uploadRecord, error: uploadRecordError } = await supabase
+      // 3. Enregistrer upload
+      const { data: uploadRecord } = await supabase
         .from('pdf_uploads')
         .insert({
           delivery_date_id: dateData.id,
@@ -153,25 +201,29 @@ export default function UploadPDF() {
         })
         .select()
         .single()
-      if (uploadRecordError) throw new Error('Erreur enregistrement : ' + uploadRecordError.message)
 
-      // 4. Lire le PDF et extraire le texte via FileReader
+      // 4. Extraction texte PDF avec pdf.js
       setProgress('Extraction du texte du PDF...')
       const text = await extractTextFromPDF(file)
 
-      // 5. Parser le texte
+      // Debug : log les 500 premiers caractères
+      console.log('PDF text sample:', text.substring(0, 500))
+
+      // 5. Parser
       setProgress('Analyse des tournées...')
-      const parsedTours = await parsePDFText(text)
+      const parsedTours = parsePDFText(text)
+      console.log('Parsed tours:', parsedTours)
 
-      if (parsedTours.length === 0) throw new Error('Aucune tournée détectée dans ce PDF.')
+      if (parsedTours.length === 0) {
+        throw new Error('Aucune tournée détectée. Vérifiez que le PDF contient bien les lignes TOURNEE TA830CAMION...')
+      }
 
-      // 6. Insérer les tournées et colis en base
+      // 6. Insertion en base
       setProgress(`Insertion de ${parsedTours.length} tournées...`)
       let totalTours = 0
       let totalParcels = 0
 
       for (const tour of parsedTours) {
-        // Créer ou mettre à jour la tournée
         const { data: tourData, error: tourError } = await supabase
           .from('tours')
           .upsert({
@@ -189,45 +241,45 @@ export default function UploadPDF() {
           continue
         }
 
-        // Insérer les colis à scanner
         if (tour.parcels.length > 0) {
-          const parcelsToInsert = tour.parcels.map(p => ({
-            tour_id: tourData.id,
-            barcode: p.barcode,
-            excluded: false,
-          }))
           const { error: parcelsError } = await supabase
             .from('parcels')
-            .upsert(parcelsToInsert, { onConflict: 'barcode', ignoreDuplicates: true })
+            .upsert(
+              tour.parcels.map(p => ({ tour_id: tourData.id, barcode: p.barcode, excluded: false })),
+              { onConflict: 'barcode', ignoreDuplicates: true }
+            )
           if (!parcelsError) totalParcels += tour.parcels.length
         }
 
-        // Insérer les colis exclus (Reprise)
         if (tour.excluded.length > 0) {
-          const excludedToInsert = tour.excluded.map(p => ({
-            tour_id: tourData.id,
-            barcode: p.barcode,
-            excluded: true,
-            exclusion_reason: p.exclusionReason || 'Reprise',
-          }))
-          await supabase.from('parcels').upsert(excludedToInsert, { onConflict: 'barcode', ignoreDuplicates: true })
+          await supabase.from('parcels').upsert(
+            tour.excluded.map(p => ({
+              tour_id: tourData.id,
+              barcode: p.barcode,
+              excluded: true,
+              exclusion_reason: p.exclusionReason || 'Reprise',
+            })),
+            { onConflict: 'barcode', ignoreDuplicates: true }
+          )
         }
 
         totalTours++
       }
 
-      // 7. Mettre à jour le statut de l'upload
-      await supabase.from('pdf_uploads').update({
-        status: 'done',
-        tours_created: totalTours,
-        parcels_created: totalParcels,
-      }).eq('id', uploadRecord.id)
+      // 7. Mettre à jour statut upload
+      if (uploadRecord) {
+        await supabase.from('pdf_uploads').update({
+          status: 'done',
+          tours_created: totalTours,
+          parcels_created: totalParcels,
+        }).eq('id', uploadRecord.id)
+      }
 
       setResult({ success: true, tours: totalTours, parcels: totalParcels, details: parsedTours })
       toast.success(`Import terminé : ${totalTours} tournées, ${totalParcels} colis`)
 
     } catch (err) {
-      console.error(err)
+      console.error('Upload error:', err)
       setResult({ success: false, error: err.message })
       toast.error('Erreur : ' + err.message)
     } finally {
@@ -250,22 +302,19 @@ export default function UploadPDF() {
           </div>
           <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
-            {/* Date */}
             <div className="form-group">
-              <label className="form-label">Date de livraison (tournées du lendemain)</label>
+              <label className="form-label">Date de livraison</label>
               <input
                 type="date"
                 className="form-input"
                 value={deliveryDate || tomorrowStr}
                 onChange={e => setDeliveryDate(e.target.value)}
-                min={new Date().toISOString().split('T')[0]}
               />
               <span style={{ fontSize: '12px', color: 'var(--gray-400)' }}>
                 Exemple : si aujourd'hui on contrôle les tournées du 16 avril, sélectionnez le 16 avril.
               </span>
             </div>
 
-            {/* Upload zone */}
             <div
               className={`upload-zone${dragover ? ' dragover' : ''}`}
               onClick={() => inputRef.current?.click()}
@@ -289,10 +338,7 @@ export default function UploadPDF() {
                       {(file.size / 1024 / 1024).toFixed(2)} Mo
                     </div>
                   </div>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    onClick={e => { e.stopPropagation(); setFile(null) }}
-                  >
+                  <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); setFile(null) }}>
                     <X size={14} />
                   </button>
                 </div>
@@ -305,7 +351,6 @@ export default function UploadPDF() {
               )}
             </div>
 
-            {/* Progress */}
             {loading && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', background: 'var(--accent-light)', borderRadius: 'var(--radius-sm)' }}>
                 <div className="spinner dark" style={{ borderTopColor: 'var(--accent)', borderColor: 'rgba(79,70,229,0.2)' }} />
@@ -313,19 +358,14 @@ export default function UploadPDF() {
               </div>
             )}
 
-            {/* Result */}
             {result && (
               <div style={{
-                padding: '16px 20px',
-                borderRadius: 'var(--radius-sm)',
+                padding: '16px 20px', borderRadius: 'var(--radius-sm)',
                 background: result.success ? 'var(--green-light)' : 'var(--red-light)',
                 border: `1px solid ${result.success ? '#a7f3d0' : '#fca5a5'}`,
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: result.success ? '8px' : 0 }}>
-                  {result.success
-                    ? <CheckCircle size={18} color="#059669" />
-                    : <AlertCircle size={18} color="#dc2626" />
-                  }
+                  {result.success ? <CheckCircle size={18} color="#059669" /> : <AlertCircle size={18} color="#dc2626" />}
                   <span style={{ fontWeight: 600, color: result.success ? '#065f46' : '#991b1b', fontSize: '14px' }}>
                     {result.success ? 'Import réussi !' : 'Erreur lors de l\'import'}
                   </span>
@@ -360,35 +400,4 @@ export default function UploadPDF() {
       </div>
     </>
   )
-}
-
-// Extraction de texte PDF côté client via FileReader (lecture brute)
-// Pour les PDFs textuels comme celui-ci, on peut lire le flux texte
-async function extractTextFromPDF(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      const buffer = e.target.result
-      const bytes = new Uint8Array(buffer)
-      let text = ''
-      // Décodage UTF-8 / Latin-1 du flux PDF
-      for (let i = 0; i < bytes.length; i++) {
-        const b = bytes[i]
-        if (b >= 32 && b < 127) text += String.fromCharCode(b)
-        else if (b === 10 || b === 13) text += '\n'
-      }
-      // Extraction des chaînes entre parenthèses (format PDF Tj/TJ)
-      const matches = []
-      const re = /\(([^)]{1,200})\)\s*Tj/g
-      let m
-      while ((m = re.exec(text)) !== null) {
-        matches.push(m[1])
-      }
-      // Si on a extrait du texte, l'utiliser ; sinon utiliser le texte brut
-      const result = matches.length > 100 ? matches.join('\n') : text
-      resolve(result)
-    }
-    reader.onerror = reject
-    reader.readAsArrayBuffer(file)
-  })
 }
