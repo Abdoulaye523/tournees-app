@@ -10,7 +10,7 @@ const SCAN_RESULTS = {
   ok: { label: 'Colis conforme', sub: 'Présent sur cette tournée', cls: 'ok', icon: '✓', color: '#059669' },
   already_scanned: { label: 'Colis déjà scanné', sub: 'Ce colis a déjà été contrôlé', cls: 'already', icon: '↺', color: '#2563eb' },
   unknown: { label: 'Colis inconnu', sub: 'Code-barres non reconnu', cls: 'unknown', icon: '?', color: '#d97706' },
-  wrong_tour: { label: 'Mauvaise tournée', sub: 'Ce colis appartient à une autre tournée', cls: 'wrong', icon: '⚠', color: '#dc2626' },
+  wrong_tour: { label: 'Mauvaise tournée', sub: 'Colis sur une autre tournée', cls: 'wrong', icon: '⚠', color: '#dc2626' },
 }
 
 export default function ScanPage() {
@@ -32,6 +32,9 @@ export default function ScanPage() {
   const manualInputRef = useRef(null)
   const popupTimer = useRef(null)
   const bufferTimer = useRef(null)
+  // On garde tourId dans une ref pour l'utiliser dans les closures sans dépendances
+  const tourIdRef = useRef(tourId)
+  tourIdRef.current = tourId
 
   useEffect(() => {
     const on = () => setOnline(true)
@@ -41,92 +44,150 @@ export default function ScanPage() {
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
   }, [])
 
-  useEffect(() => { fetchTour() }, [tourId])
-
+  // Focus TC51
   useEffect(() => {
     if (manualMode) return
     const keepFocus = () => {
-      if (document.activeElement !== scanInputRef.current) scanInputRef.current && scanInputRef.current.focus()
+      if (scanInputRef.current && document.activeElement !== scanInputRef.current) {
+        scanInputRef.current.focus()
+      }
     }
     const interval = setInterval(keepFocus, 300)
-    scanInputRef.current && scanInputRef.current.focus()
+    if (scanInputRef.current) scanInputRef.current.focus()
     return () => clearInterval(interval)
   }, [manualMode])
 
   useEffect(() => {
-    if (manualMode) setTimeout(() => manualInputRef.current && manualInputRef.current.focus(), 50)
+    if (manualMode && manualInputRef.current) {
+      setTimeout(() => manualInputRef.current.focus(), 50)
+    }
   }, [manualMode])
 
-  // Polling 3s pour actualiser les compteurs
+  // Fonction de refresh — stable grâce à la ref
+  const refreshData = useCallback(async () => {
+    const id = tourIdRef.current
+    if (!id) return
+
+    try {
+      const { data: s } = await supabase
+        .from('tour_scan_summary')
+        .select('*')
+        .eq('tour_id', id)
+        .single()
+
+      if (s) setSummary(s)
+
+      const { data: scans } = await supabase
+        .from('scan_events')
+        .select('*, users(full_name)')
+        .eq('tour_id', id)
+        .order('scanned_at', { ascending: false })
+        .limit(8)
+
+      if (scans) setLastScans(scans)
+    } catch (err) {
+      console.error('refreshData error:', err)
+    }
+  }, []) // pas de dépendances → fonction stable
+
+  // Chargement initial
   useEffect(() => {
-    if (!tourId) return
-    const interval = setInterval(fetchSummary, 3000)
+    async function init() {
+      const { data: tourData } = await supabase
+        .from('tours').select('*').eq('id', tourId).single()
+      setTour(tourData)
+      await refreshData()
+      setLoading(false)
+    }
+    init()
+  }, [tourId, refreshData])
+
+  // Polling toutes les 3 secondes — fonctionne car refreshData est stable
+  useEffect(() => {
+    const interval = setInterval(refreshData, 3000)
     return () => clearInterval(interval)
-  }, [tourId])
+  }, [refreshData])
 
-  // Realtime en complément
-  useEffect(() => {
-    if (!tourId) return
-    const channel = supabase
-      .channel('scan-' + tourId)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'scan_events', filter: 'tour_id=eq.' + tourId }, fetchSummary)
-      .subscribe()
-    return () => supabase.removeChannel(channel)
-  }, [tourId])
-
-  async function fetchTour() {
-    const { data: tourData } = await supabase.from('tours').select('*').eq('id', tourId).single()
-    setTour(tourData)
-    await fetchSummary()
-    setLoading(false)
-  }
-
-  async function fetchSummary() {
-    const { data } = await supabase.from('tour_scan_summary').select('*').eq('tour_id', tourId).single()
-    if (data) setSummary(data)
-    const { data: scans } = await supabase
-      .from('scan_events').select('*, users(full_name)')
-      .eq('tour_id', tourId).order('scanned_at', { ascending: false }).limit(8)
-    if (scans) setLastScans(scans)
-  }
-
+  // Traitement scan
   const processScan = useCallback(async (barcode) => {
     const bc = barcode.trim()
     if (!bc || bc.length < 5) return
 
-    const { data: parcel } = await supabase.from('parcels').select('*, tours(id, name)').eq('barcode', bc).single()
+    const id = tourIdRef.current
 
-    let resultType, parcelId = null
+    try {
+      const { data: parcel } = await supabase
+        .from('parcels')
+        .select('id, tour_id, excluded')
+        .eq('barcode', bc)
+        .single()
 
-    if (!parcel) {
-      resultType = 'unknown'
-    } else if (parcel.excluded) {
-      resultType = 'unknown'; parcelId = parcel.id
-    } else if (parcel.tour_id !== tourId) {
-      resultType = 'wrong_tour'; parcelId = parcel.id
-    } else {
-      const { data: existing } = await supabase
-        .from('scan_events').select('id').eq('tour_id', tourId).eq('parcel_id', parcel.id)
-        .in('result_type', ['ok', 'already_scanned']).limit(1).single()
-      resultType = existing ? 'already_scanned' : 'ok'
-      parcelId = parcel.id
+      let resultType, parcelId = null
+
+      if (!parcel) {
+        resultType = 'unknown'
+      } else if (parcel.excluded) {
+        resultType = 'unknown'; parcelId = parcel.id
+      } else if (parcel.tour_id !== id) {
+        resultType = 'wrong_tour'; parcelId = parcel.id
+      } else {
+        const { data: existing } = await supabase
+          .from('scan_events')
+          .select('id')
+          .eq('tour_id', id)
+          .eq('parcel_id', parcel.id)
+          .in('result_type', ['ok', 'already_scanned'])
+          .limit(1)
+          .single()
+        resultType = existing ? 'already_scanned' : 'ok'
+        parcelId = parcel.id
+      }
+
+      await supabase.from('scan_events').insert({
+        tour_id: id,
+        parcel_id: parcelId,
+        user_id: profile.id,
+        barcode_scanned: bc,
+        result_type: resultType,
+      })
+
+      // Mise à jour immédiate des compteurs
+      if (resultType === 'ok') {
+        setSummary(prev => {
+          if (!prev) return prev
+          const newScanned = (prev.scanned_count || 0) + 1
+          const newMissing = Math.max(0, (prev.total_parcels || 0) - newScanned)
+          return { ...prev, scanned_count: newScanned, missing_count: newMissing }
+        })
+      } else if (resultType === 'unknown') {
+        setSummary(prev => prev ? { ...prev, unknown_count: (prev.unknown_count || 0) + 1 } : prev)
+      } else if (resultType === 'wrong_tour') {
+        setSummary(prev => prev ? { ...prev, wrong_tour_count: (prev.wrong_tour_count || 0) + 1 } : prev)
+      }
+
+      // Ajouter le scan en tête de l'historique immédiatement
+      setLastScans(prev => [{
+        id: Date.now(),
+        barcode_scanned: bc,
+        result_type: resultType,
+        scanned_at: new Date().toISOString(),
+        users: { full_name: profile.full_name },
+      }, ...prev.slice(0, 7)])
+
+      // Afficher popup
+      if (popupTimer.current) clearTimeout(popupTimer.current)
+      setPopup({ type: resultType, barcode: bc })
+      popupTimer.current = setTimeout(() => setPopup(null), POPUP_DURATION)
+
+      // Refresh depuis la base après 1s pour corriger si besoin
+      setTimeout(refreshData, 1000)
+
+    } catch (err) {
+      console.error('processScan error:', err)
     }
+  }, [profile, refreshData])
 
-    await supabase.from('scan_events').insert({
-      tour_id: tourId, parcel_id: parcelId, user_id: profile.id,
-      barcode_scanned: bc, result_type: resultType,
-    })
-
-    showPopup(resultType, bc)
-    await fetchSummary()
-  }, [tourId, profile])
-
-  function showPopup(type, barcode) {
-    if (popupTimer.current) clearTimeout(popupTimer.current)
-    setPopup({ type, barcode })
-    popupTimer.current = setTimeout(() => setPopup(null), POPUP_DURATION)
-  }
-
+  // Gestion input TC51
   function handleScanInput(e) {
     const val = e.target.value
     setScanInput(val)
@@ -146,21 +207,28 @@ export default function ScanPage() {
     if (e.key === 'Enter') {
       e.preventDefault()
       const bc = scanInput.trim()
-      if (bc.length >= 5) { if (bufferTimer.current) clearTimeout(bufferTimer.current); processScan(bc); setScanInput('') }
+      if (bc.length >= 5) {
+        if (bufferTimer.current) clearTimeout(bufferTimer.current)
+        processScan(bc); setScanInput('')
+      }
     }
   }
 
   function handleManualSubmit() {
     const bc = manualInput.trim()
-    if (bc.length >= 5) { processScan(bc); setManualInput(''); manualInputRef.current && manualInputRef.current.focus() }
+    if (bc.length >= 5) {
+      processScan(bc)
+      setManualInput('')
+      if (manualInputRef.current) manualInputRef.current.focus()
+    }
   }
 
   if (loading) return <div className="loading-center" style={{ height: '100%' }}><div className="spinner dark" /></div>
 
-  const scanned = summary ? summary.scanned_count : 0
-  const total = summary ? summary.total_parcels : 0
-  const missing = summary ? summary.missing_count : 0
-  const anomalies = summary ? (summary.wrong_tour_count + summary.unknown_count) : 0
+  const scanned = summary ? (summary.scanned_count || 0) : 0
+  const total = summary ? (summary.total_parcels || 0) : 0
+  const missing = summary ? (summary.missing_count || 0) : 0
+  const anomalies = summary ? ((summary.wrong_tour_count || 0) + (summary.unknown_count || 0)) : 0
   const pct = total > 0 ? Math.round((scanned / total) * 100) : 0
 
   return (
@@ -195,7 +263,7 @@ export default function ScanPage() {
         </div>
       )}
 
-      {/* ── HEADER compact ── */}
+      {/* Header compact */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '10px 14px',
@@ -206,7 +274,6 @@ export default function ScanPage() {
         <button className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => navigate('/operator')}>
           <ArrowLeft size={16} />
         </button>
-
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
             fontFamily: 'var(--font-display)', fontWeight: 800,
@@ -217,7 +284,6 @@ export default function ScanPage() {
             {tour && tour.name}
           </div>
         </div>
-
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           {online ? <Wifi size={13} color="var(--green)" /> : <WifiOff size={13} color="var(--red)" />}
           <button
@@ -231,13 +297,12 @@ export default function ScanPage() {
         </div>
       </div>
 
-      {/* ── CONTENU ── */}
+      {/* Contenu */}
       <div style={{ flex: 1, padding: '14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
         {/* Compteurs */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
 
-          {/* Scannés */}
           <div style={{
             background: 'var(--white)', borderRadius: 'var(--radius)',
             border: '1px solid var(--gray-200)', borderTop: '3px solid var(--accent)',
@@ -254,7 +319,6 @@ export default function ScanPage() {
             <div style={{ fontSize: 10, color: 'var(--gray-400)', marginTop: 2 }}>{pct}%</div>
           </div>
 
-          {/* Manquants */}
           <div style={{
             background: 'var(--white)', borderRadius: 'var(--radius)',
             border: '1px solid var(--gray-200)', borderTop: '3px solid ' + (missing > 0 ? 'var(--red)' : 'var(--green)'),
@@ -267,7 +331,6 @@ export default function ScanPage() {
             {missing === 0 && scanned > 0 && <div style={{ marginTop: 4 }}><CheckCircle size={13} color="var(--green)" /></div>}
           </div>
 
-          {/* Anomalies */}
           <div style={{
             background: 'var(--white)', borderRadius: 'var(--radius)',
             border: '1px solid var(--gray-200)', borderTop: '3px solid ' + (anomalies > 0 ? 'var(--orange)' : 'var(--gray-200)'),
@@ -280,7 +343,7 @@ export default function ScanPage() {
           </div>
         </div>
 
-        {/* Zone scan / saisie manuelle */}
+        {/* Zone scan */}
         {manualMode ? (
           <div style={{
             background: 'var(--white)', borderRadius: 'var(--radius)',
@@ -346,13 +409,13 @@ export default function ScanPage() {
 
         {/* Historique */}
         {lastScans.length > 0 && (
-          <div className="card" style={{ overflow: 'hidden', flex: 1 }}>
+          <div className="card" style={{ overflow: 'hidden' }}>
             <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--gray-100)' }}>
               <span style={{ fontFamily: 'var(--font-display)', fontSize: 12, fontWeight: 600, color: 'var(--gray-700)' }}>
                 Derniers scans
               </span>
             </div>
-            <div style={{ overflowY: 'auto' }}>
+            <div style={{ overflowY: 'auto', maxHeight: 180 }}>
               {lastScans.map(s => {
                 const r = SCAN_RESULTS[s.result_type]
                 return (
@@ -362,7 +425,8 @@ export default function ScanPage() {
                   }}>
                     <span style={{
                       width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
-                      background: r ? r.color + '20' : '#eee', color: r ? r.color : '#999',
+                      background: r ? r.color + '20' : '#eee',
+                      color: r ? r.color : '#999',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 10, fontWeight: 700,
                     }}>
