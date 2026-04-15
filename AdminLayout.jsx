@@ -1,7 +1,8 @@
+import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from './AuthContext'
 import {
-  LayoutDashboard, Truck, Upload, Users, Search, FileSearch, LogOut
+  LayoutDashboard, Truck, Upload, Users, Search, FileSearch, LogOut, Menu, X
 } from 'lucide-react'
 
 const navItems = [
@@ -19,6 +20,7 @@ const navItems2 = [
 export default function AdminLayout() {
   const { profile, signOut } = useAuth()
   const navigate = useNavigate()
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const initials = profile?.full_name
     ? profile.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
@@ -29,12 +31,27 @@ export default function AdminLayout() {
     navigate('/login')
   }
 
+  function closeSidebar() { setSidebarOpen(false) }
+
   return (
     <div className="app-layout">
-      <aside className="sidebar">
+
+      {/* Overlay mobile */}
+      <div
+        className={`sidebar-overlay${sidebarOpen ? ' open' : ''}`}
+        onClick={closeSidebar}
+      />
+
+      {/* Sidebar */}
+      <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>
         <div className="sidebar-logo">
-          <h1>CCV<span>.</span></h1>
-          <p>Administration</p>
+          <div>
+            <h1>CCV<span>.</span></h1>
+            <p>Administration</p>
+          </div>
+          <button className="sidebar-close" onClick={closeSidebar}>
+            <X size={18} />
+          </button>
         </div>
 
         <nav className="sidebar-nav">
@@ -45,6 +62,7 @@ export default function AdminLayout() {
               to={item.to}
               end={item.end}
               className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+              onClick={closeSidebar}
             >
               {item.icon}
               {item.label}
@@ -57,6 +75,7 @@ export default function AdminLayout() {
               key={item.to}
               to={item.to}
               className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+              onClick={closeSidebar}
             >
               {item.icon}
               {item.label}
@@ -78,7 +97,19 @@ export default function AdminLayout() {
         </div>
       </aside>
 
+      {/* Main */}
       <main className="main-content">
+        {/* Topbar mobile */}
+        <div className="mobile-topbar">
+          <button className="btn-menu" onClick={() => setSidebarOpen(true)}>
+            <Menu size={22} />
+          </button>
+          <span className="mobile-topbar-logo">CCV<span>.</span></span>
+          <div className="user-avatar" style={{ width: 32, height: 32, fontSize: 11 }}>
+            {initials}
+          </div>
+        </div>
+
         <Outlet />
       </main>
     </div>
