@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from './supabase'
 import { useAuth } from './AuthContext'
-import { ArrowLeft, Package, CheckCircle, Wifi, WifiOff, Keyboard } from 'lucide-react'
+import { ArrowLeft, Package, CheckCircle, Wifi, WifiOff, Keyboard, AlertCircle } from 'lucide-react'
 
 const POPUP_DURATION = 2500
 
@@ -19,20 +19,25 @@ export default function ScanPage() {
   const navigate = useNavigate()
 
   const [tour, setTour] = useState(null)
-  const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(true)
   const [popup, setPopup] = useState(null)
-  const [lastScans, setLastScans] = useState([])
-  const [scanInput, setScanInput] = useState('')
   const [manualInput, setManualInput] = useState('')
   const [manualMode, setManualMode] = useState(false)
   const [online, setOnline] = useState(navigator.onLine)
+  const [scanInput, setScanInput] = useState('')
+  const [showMissing, setShowMissing] = useState(false)
+
+  const [totalParcels, setTotalParcels] = useState(0)
+  const [allParcels, setAllParcels] = useState([]) // tous les colis de la tournée (hors exclus)
+  const [scannedBarcodes, setScannedBarcodes] = useState(new Set())
+  const [scannedList, setScannedList] = useState([])
+  const [wrongTourCount, setWrongTourCount] = useState(0)
+  const [unknownCount, setUnknownCount] = useState(0)
 
   const scanInputRef = useRef(null)
   const manualInputRef = useRef(null)
   const popupTimer = useRef(null)
   const bufferTimer = useRef(null)
-  // On garde tourId dans une ref pour l'utiliser dans les closures sans dépendances
   const tourIdRef = useRef(tourId)
   tourIdRef.current = tourId
 
@@ -44,7 +49,6 @@ export default function ScanPage() {
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
   }, [])
 
-  // Focus TC51
   useEffect(() => {
     if (manualMode) return
     const keepFocus = () => {
@@ -63,62 +67,63 @@ export default function ScanPage() {
     }
   }, [manualMode])
 
-  // Fonction de refresh — stable grâce à la ref
-  const refreshData = useCallback(async () => {
-    const id = tourIdRef.current
-    if (!id) return
-
-    try {
-      const { data: s } = await supabase
-        .from('tour_scan_summary')
-        .select('*')
-        .eq('tour_id', id)
-        .single()
-
-      if (s) {
-        setSummary(prev => {
-          if (!prev) return s
-          // Ne jamais réduire le compteur de scans si la base n'est pas encore à jour
-          return {
-            ...s,
-            scanned_count: Math.max(s.scanned_count || 0, prev.scanned_count || 0),
-            missing_count: Math.min(s.missing_count || 0, prev.missing_count || 0),
-          }
-        })
-      }
-
-      const { data: scans } = await supabase
-        .from('scan_events')
-        .select('*, users(full_name)')
-        .eq('tour_id', id)
-        .order('scanned_at', { ascending: false })
-        .limit(8)
-
-      if (scans) setLastScans(scans)
-    } catch (err) {
-      console.error('refreshData error:', err)
-    }
-  }, []) // pas de dépendances → fonction stable
-
-  // Chargement initial
   useEffect(() => {
     async function init() {
+      // Charger la tournée
       const { data: tourData } = await supabase
         .from('tours').select('*').eq('id', tourId).single()
       setTour(tourData)
-      await refreshData()
+      if (tourData) setTotalParcels(tourData.total_parcels || 0)
+
+      // Charger tous les colis de la tournée (hors Reprise)
+      const { data: parcels } = await supabase
+        .from('parcels')
+        .select('barcode')
+        .eq('tour_id', tourId)
+        .eq('excluded', false)
+        .order('barcode')
+      if (parcels) setAllParcels(parcels)
+
+      // Charger l'historique des scans existants
+      const { data: existingScans } = await supabase
+        .from('scan_events')
+        .select('barcode_scanned, result_type, scanned_at')
+        .eq('tour_id', tourId)
+        .order('scanned_at', { ascending: false })
+
+      if (existingScans && existingScans.length > 0) {
+        const okBarcodes = new Set()
+        const okList = []
+        let wrong = 0
+        let unknown = 0
+
+        for (const scan of existingScans) {
+          if (scan.result_type === 'ok' || scan.result_type === 'already_scanned') {
+            const bc = scan.barcode_scanned
+            if (!okBarcodes.has(bc)) {
+              okBarcodes.add(bc)
+              if (scan.result_type === 'ok') {
+                okList.push({ barcode: bc, scanned_at: scan.scanned_at })
+              }
+            }
+          } else if (scan.result_type === 'wrong_tour') {
+            wrong++
+          } else if (scan.result_type === 'unknown') {
+            unknown++
+          }
+        }
+
+        setScannedBarcodes(okBarcodes)
+        setScannedList(okList)
+        setWrongTourCount(wrong)
+        setUnknownCount(unknown)
+      }
+
       setLoading(false)
     }
     init()
-  }, [tourId, refreshData])
+  }, [tourId])
 
-  // Polling toutes les 3 secondes — fonctionne car refreshData est stable
-  useEffect(() => {
-    const interval = setInterval(refreshData, 3000)
-    return () => clearInterval(interval)
-  }, [refreshData])
-
-  // Traitement scan
   const processScan = useCallback(async (barcode) => {
     const bc = barcode.trim()
     if (!bc || bc.length < 5) return
@@ -128,7 +133,7 @@ export default function ScanPage() {
     try {
       const { data: parcel } = await supabase
         .from('parcels')
-        .select('id, tour_id, excluded')
+        .select('id, tour_id, excluded, barcode')
         .eq('barcode', bc)
         .single()
 
@@ -141,15 +146,11 @@ export default function ScanPage() {
       } else if (parcel.tour_id !== id) {
         resultType = 'wrong_tour'; parcelId = parcel.id
       } else {
-        const { data: existing } = await supabase
-          .from('scan_events')
-          .select('id')
-          .eq('tour_id', id)
-          .eq('parcel_id', parcel.id)
-          .in('result_type', ['ok', 'already_scanned'])
-          .limit(1)
-          .single()
-        resultType = existing ? 'already_scanned' : 'ok'
+        if (scannedBarcodes.has(bc)) {
+          resultType = 'already_scanned'
+        } else {
+          resultType = 'ok'
+        }
         parcelId = parcel.id
       }
 
@@ -161,43 +162,24 @@ export default function ScanPage() {
         result_type: resultType,
       })
 
-      // Mise à jour immédiate des compteurs
       if (resultType === 'ok') {
-        setSummary(prev => {
-          if (!prev) return prev
-          const newScanned = (prev.scanned_count || 0) + 1
-          const newMissing = Math.max(0, (prev.total_parcels || 0) - newScanned)
-          return { ...prev, scanned_count: newScanned, missing_count: newMissing }
-        })
-      } else if (resultType === 'unknown') {
-        setSummary(prev => prev ? { ...prev, unknown_count: (prev.unknown_count || 0) + 1 } : prev)
+        setScannedBarcodes(prev => new Set([...prev, bc]))
+        setScannedList(prev => [{ barcode: bc, scanned_at: new Date().toISOString() }, ...prev])
       } else if (resultType === 'wrong_tour') {
-        setSummary(prev => prev ? { ...prev, wrong_tour_count: (prev.wrong_tour_count || 0) + 1 } : prev)
+        setWrongTourCount(prev => prev + 1)
+      } else if (resultType === 'unknown') {
+        setUnknownCount(prev => prev + 1)
       }
 
-      // Ajouter le scan en tête de l'historique immédiatement
-      setLastScans(prev => [{
-        id: Date.now(),
-        barcode_scanned: bc,
-        result_type: resultType,
-        scanned_at: new Date().toISOString(),
-        users: { full_name: profile.full_name },
-      }, ...prev.slice(0, 7)])
-
-      // Afficher popup
       if (popupTimer.current) clearTimeout(popupTimer.current)
       setPopup({ type: resultType, barcode: bc })
       popupTimer.current = setTimeout(() => setPopup(null), POPUP_DURATION)
 
-      // Refresh depuis la base après 4s — laisse le temps au trigger Supabase de calculer la vue
-      setTimeout(refreshData, 4000)
-
     } catch (err) {
       console.error('processScan error:', err)
     }
-  }, [profile, refreshData])
+  }, [scannedBarcodes, profile])
 
-  // Gestion input TC51
   function handleScanInput(e) {
     const val = e.target.value
     setScanInput(val)
@@ -235,11 +217,13 @@ export default function ScanPage() {
 
   if (loading) return <div className="loading-center" style={{ height: '100%' }}><div className="spinner dark" /></div>
 
-  const scanned = summary ? (summary.scanned_count || 0) : 0
-  const total = summary ? (summary.total_parcels || 0) : 0
-  const missing = summary ? (summary.missing_count || 0) : 0
-  const anomalies = summary ? ((summary.wrong_tour_count || 0) + (summary.unknown_count || 0)) : 0
-  const pct = total > 0 ? Math.round((scanned / total) * 100) : 0
+  const scanned = scannedBarcodes.size
+  const missing = Math.max(0, totalParcels - scanned)
+  const anomalies = wrongTourCount + unknownCount
+  const pct = totalParcels > 0 ? Math.round((scanned / totalParcels) * 100) : 0
+
+  // Colis manquants = tous les colis de la tournée qui ne sont pas dans scannedBarcodes
+  const missingParcels = allParcels.filter(p => !scannedBarcodes.has(p.barcode))
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', boxSizing: 'border-box' }}>
@@ -320,7 +304,7 @@ export default function ScanPage() {
           }}>
             <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 'clamp(22px, 6vw, 38px)', lineHeight: 1, color: 'var(--gray-800)' }}>
               {scanned}
-              <span style={{ fontSize: 'clamp(11px, 3vw, 16px)', color: 'var(--gray-300)', fontWeight: 400 }}>/{total}</span>
+              <span style={{ fontSize: 'clamp(11px, 3vw, 16px)', color: 'var(--gray-300)', fontWeight: 400 }}>/{totalParcels}</span>
             </div>
             <div style={{ fontSize: 11, color: 'var(--gray-400)', margin: '4px 0' }}>Scannés</div>
             <div style={{ height: 4, background: 'var(--gray-100)', borderRadius: 100, overflow: 'hidden' }}>
@@ -329,16 +313,29 @@ export default function ScanPage() {
             <div style={{ fontSize: 10, color: 'var(--gray-400)', marginTop: 2 }}>{pct}%</div>
           </div>
 
-          <div style={{
-            background: 'var(--white)', borderRadius: 'var(--radius)',
-            border: '1px solid var(--gray-200)', borderTop: '3px solid ' + (missing > 0 ? 'var(--red)' : 'var(--green)'),
-            padding: '12px 8px', textAlign: 'center', boxShadow: 'var(--shadow-sm)',
-          }}>
+          {/* Manquants — cliquable pour afficher/masquer la liste */}
+          <div
+            onClick={() => missing > 0 && setShowMissing(!showMissing)}
+            style={{
+              background: 'var(--white)', borderRadius: 'var(--radius)',
+              border: '1px solid var(--gray-200)', borderTop: '3px solid ' + (missing > 0 ? 'var(--red)' : 'var(--green)'),
+              padding: '12px 8px', textAlign: 'center', boxShadow: 'var(--shadow-sm)',
+              cursor: missing > 0 ? 'pointer' : 'default',
+              transition: 'box-shadow 0.15s',
+            }}
+          >
             <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 'clamp(22px, 6vw, 38px)', lineHeight: 1, color: missing > 0 ? 'var(--red)' : 'var(--green)' }}>
               {missing}
             </div>
             <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 4 }}>Manquants</div>
-            {missing === 0 && scanned > 0 && <div style={{ marginTop: 4 }}><CheckCircle size={13} color="var(--green)" /></div>}
+            {missing === 0 && scanned > 0
+              ? <div style={{ marginTop: 4 }}><CheckCircle size={13} color="var(--green)" /></div>
+              : missing > 0 && (
+                <div style={{ fontSize: 10, color: 'var(--red)', marginTop: 3 }}>
+                  {showMissing ? '▲ masquer' : '▼ voir'}
+                </div>
+              )
+            }
           </div>
 
           <div style={{
@@ -353,7 +350,42 @@ export default function ScanPage() {
           </div>
         </div>
 
-        {/* Zone scan */}
+        {/* Liste des colis manquants (dépliable) */}
+        {showMissing && missingParcels.length > 0 && (
+          <div className="card" style={{ overflow: 'hidden' }}>
+            <div style={{
+              padding: '8px 12px', borderBottom: '1px solid var(--gray-100)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              background: 'var(--red-light)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <AlertCircle size={13} color="var(--red)" />
+                <span style={{ fontFamily: 'var(--font-display)', fontSize: 12, fontWeight: 600, color: '#991b1b' }}>
+                  Colis manquants
+                </span>
+              </div>
+              <span style={{ fontSize: 11, color: '#991b1b', fontWeight: 500 }}>{missingParcels.length}</span>
+            </div>
+            <div style={{ overflowY: 'auto', maxHeight: 220 }}>
+              {missingParcels.map(p => (
+                <div key={p.barcode} style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '8px 12px', borderBottom: '1px solid var(--gray-100)',
+                }}>
+                  <span style={{
+                    width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+                    background: 'var(--red-light)', color: 'var(--red)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 10, fontWeight: 700,
+                  }}>✗</span>
+                  <code style={{ fontSize: 12, color: 'var(--gray-600)', flex: 1 }}>{p.barcode}</code>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Zone scan / saisie manuelle */}
         {manualMode ? (
           <div style={{
             background: 'var(--white)', borderRadius: 'var(--radius)',
@@ -417,38 +449,33 @@ export default function ScanPage() {
           </div>
         )}
 
-        {/* Historique */}
-        {lastScans.length > 0 && (
+        {/* Liste colis confirmés */}
+        {scannedList.length > 0 && (
           <div className="card" style={{ overflow: 'hidden' }}>
-            <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--gray-100)' }}>
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--gray-100)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontFamily: 'var(--font-display)', fontSize: 12, fontWeight: 600, color: 'var(--gray-700)' }}>
-                Derniers scans
+                Colis confirmés
               </span>
+              <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>{scannedList.length} colis</span>
             </div>
-            <div style={{ overflowY: 'auto', maxHeight: 180 }}>
-              {lastScans.map(s => {
-                const r = SCAN_RESULTS[s.result_type]
-                return (
-                  <div key={s.id} style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '7px 12px', borderBottom: '1px solid var(--gray-100)',
-                  }}>
-                    <span style={{
-                      width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
-                      background: r ? r.color + '20' : '#eee',
-                      color: r ? r.color : '#999',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 10, fontWeight: 700,
-                    }}>
-                      {r && r.icon}
-                    </span>
-                    <code style={{ fontSize: 12, color: 'var(--gray-600)', flex: 1 }}>{s.barcode_scanned}</code>
-                    <span style={{ fontSize: 10, color: 'var(--gray-400)', flexShrink: 0 }}>
-                      {new Date(s.scanned_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                    </span>
-                  </div>
-                )
-              })}
+            <div style={{ overflowY: 'auto', maxHeight: 200 }}>
+              {scannedList.map((s, idx) => (
+                <div key={s.barcode + idx} style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '7px 12px', borderBottom: '1px solid var(--gray-100)',
+                }}>
+                  <span style={{
+                    width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+                    background: '#05996920', color: '#059669',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 10, fontWeight: 700,
+                  }}>✓</span>
+                  <code style={{ fontSize: 12, color: 'var(--gray-600)', flex: 1 }}>{s.barcode}</code>
+                  <span style={{ fontSize: 10, color: 'var(--gray-400)', flexShrink: 0 }}>
+                    {new Date(s.scanned_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         )}
