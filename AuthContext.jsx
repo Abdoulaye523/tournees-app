@@ -8,24 +8,6 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  async function fetchProfile(userId) {
-    try {
-      const { data } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', userId)
-        .single()
-
-      setProfile(data || null)
-    } catch (e) {
-      console.error('fetchProfile error:', e)
-      setProfile(null)
-    } finally {
-      // Toujours arrêter le loading même si ça échoue
-      setLoading(false)
-    }
-  }
-
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null)
@@ -36,20 +18,32 @@ export function AuthProvider({ children }) {
       }
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        setUser(session?.user ?? null)
-        if (session?.user) {
-          await fetchProfile(session.user.id)
-        } else {
-          setProfile(null)
-          setLoading(false)
-        }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null)
+      if (session?.user) {
+        fetchProfile(session.user.id)
+      } else {
+        setProfile(null)
+        setLoading(false)
       }
-    )
+    })
 
     return () => subscription.unsubscribe()
   }, [])
+
+  async function fetchProfile(userId) {
+    try {
+      const { data } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .single()
+      setProfile(data || null)
+    } catch (e) {
+      setProfile(null)
+    }
+    setLoading(false)
+  }
 
   async function signIn(email, password) {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -62,12 +56,8 @@ export function AuthProvider({ children }) {
     await supabase.auth.signOut()
   }
 
-  async function refreshProfile() {
-    if (user) await fetchProfile(user.id)
-  }
-
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signIn, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{ user, profile, loading, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   )
