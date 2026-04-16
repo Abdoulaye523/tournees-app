@@ -9,25 +9,24 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   async function fetchProfile(userId) {
-    // Toujours aller chercher le profil frais depuis la base
-    // sans cache pour avoir le bon rôle
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', userId)
-      .single()
+    try {
+      const { data } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .single()
 
-    if (data) {
-      setProfile(data)
-    } else {
-      console.error('fetchProfile error:', error)
+      setProfile(data || null)
+    } catch (e) {
+      console.error('fetchProfile error:', e)
       setProfile(null)
+    } finally {
+      // Toujours arrêter le loading même si ça échoue
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   useEffect(() => {
-    // Récupérer la session existante au démarrage
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null)
       if (session?.user) {
@@ -37,12 +36,10 @@ export function AuthProvider({ children }) {
       }
     })
 
-    // Écouter les changements d'état d'authentification
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         setUser(session?.user ?? null)
         if (session?.user) {
-          // Toujours recharger le profil depuis la base à chaque événement auth
           await fetchProfile(session.user.id)
         } else {
           setProfile(null)
@@ -65,7 +62,6 @@ export function AuthProvider({ children }) {
     await supabase.auth.signOut()
   }
 
-  // Fonction pour forcer le rechargement du profil (utile après un changement de rôle)
   async function refreshProfile() {
     if (user) await fetchProfile(user.id)
   }
