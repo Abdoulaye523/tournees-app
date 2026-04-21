@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from './AuthContext'
 import {
-  LayoutDashboard, Truck, Upload, Users, Search, FileSearch, LogOut, Menu, X
+  LayoutDashboard, Truck, Upload, Users, Search, FileSearch, RotateCcw, LogOut, Menu, X
 } from 'lucide-react'
 
 const navItems = [
@@ -15,6 +15,7 @@ const navItems2 = [
   { to: '/admin/search-parcel', label: 'Recherche colis', icon: <Search size={16} /> },
   { to: '/admin/search-tours', label: 'Recherche tournées', icon: <FileSearch size={16} /> },
   { to: '/admin/users', label: 'Utilisateurs', icon: <Users size={16} /> },
+  { to: '/admin/reprises', label: 'Reprises', icon: <RotateCcw size={16} /> },
 ]
 
 export default function AdminLayout() {
