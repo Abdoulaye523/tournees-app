@@ -42,7 +42,8 @@ export default function WarehousePlan() {
     const { data } = await supabase
       .from('warehouse_settings')
       .select('bg_url')
-      .single()
+      .limit(1)
+      .maybeSingle()
     if (data?.bg_url) setBgDataUrl(data.bg_url)
   }
 
