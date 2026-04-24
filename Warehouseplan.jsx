@@ -33,7 +33,7 @@ export default function WarehousePlan() {
 
   async function loadAll() {
     setLoading(true)
-    await Promise.all([loadZones(), loadDates()])
+    await Promise.all([loadZones(), loadDates(), loadBg()])
     setLoading(false)
   }
 
@@ -43,6 +43,11 @@ export default function WarehousePlan() {
       .select('id, delivery_date')
       .order('delivery_date', { ascending: false })
     setAvailableDates(data || [])
+  }
+
+  async function loadBg() {
+    const { data } = await supabase.from('warehouse_settings').select('bg_url').single()
+    if (data?.bg_url) setBgDataUrl(data.bg_url)
   }
 
   async function loadZones() {
