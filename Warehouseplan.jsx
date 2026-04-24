@@ -318,6 +318,22 @@ export default function WarehousePlan() {
     setAssignments(prev => { const n = { ...prev }; delete n[zoneId]; return n })
   }
 
+  async function removeObsoleteAssignments() {
+    const obsoleteZoneIds = Object.keys(assignments).filter(zoneId => {
+      const a = assignments[zoneId]
+      return !groupRefIds.has(a.refId)
+    })
+    for (const zoneId of obsoleteZoneIds) {
+      await supabase.from('zone_assignments').delete().eq('zone_id', zoneId)
+    }
+    setAssignments(prev => {
+      const n = { ...prev }
+      for (const zoneId of obsoleteZoneIds) delete n[zoneId]
+      return n
+    })
+    toast.success(`${obsoleteZoneIds.length} tournée(s) obsolète(s) retirée(s)`)
+  }
+
   function addDateToGroup(dateId) {
     if (!dateId || groupDates.includes(dateId)) return
     setGroupDates(prev => [...prev, dateId])
@@ -333,6 +349,15 @@ export default function WarehousePlan() {
     })
   }
 
+  // Refs présentes dans le groupe sélectionné
+  const groupRefIds = new Set(tourSlots.map(s => s.refId))
+  const obsoleteZoneIds = new Set(
+    Object.keys(assignments).filter(zoneId => {
+      const a = assignments[zoneId]
+      return groupDates.length > 0 && !groupRefIds.has(a.refId)
+    }).map(Number)
+  )
+
   return (
     <>
       <div className="page-header">
@@ -342,6 +367,11 @@ export default function WarehousePlan() {
             <p className="page-subtitle">Assignez les tournées aux zones de stockage</p>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', paddingTop: 4 }}>
+            {mode === 'view' && obsoleteZoneIds.size > 0 && (
+              <button className="btn btn-sm" style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#dc2626' }} onClick={removeObsoleteAssignments}>
+                <Trash2 size={13} /> Retirer obsolètes ({obsoleteZoneIds.size})
+              </button>
+            )}
             {mode === 'view' && unassigned.length > 0 && (
               <button className="btn btn-secondary btn-sm" onClick={autoAssign}>
                 <RotateCcw size={13} /> Auto-assigner ({unassigned.length})
@@ -461,9 +491,9 @@ export default function WarehousePlan() {
                       position: 'absolute',
                       left: zone.x, top: zone.y,
                       width: zone.width, height: zone.height,
-                      border: `2px solid ${isDragTarget ? 'var(--accent)' : isSelected ? '#f59e0b' : assign ? '#059669' : 'var(--gray-300)'}`,
+                      border: `2px solid ${isDragTarget ? 'var(--accent)' : isSelected ? '#f59e0b' : assign && obsoleteZoneIds.has(zone.id) ? '#dc2626' : assign ? '#059669' : 'var(--gray-300)'}`,
                       borderRadius: 4,
-                      background: isDragTarget ? 'rgba(99,102,241,0.15)' : assign ? 'rgba(5,150,105,0.12)' : 'rgba(255,255,255,0.6)',
+                      background: isDragTarget ? 'rgba(99,102,241,0.15)' : assign && obsoleteZoneIds.has(zone.id) ? 'rgba(220,38,38,0.08)' : assign ? 'rgba(5,150,105,0.12)' : 'rgba(255,255,255,0.6)',
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                       cursor: mode === 'edit' ? 'move' : 'pointer',
                       boxSizing: 'border-box',
@@ -485,7 +515,7 @@ export default function WarehousePlan() {
                         <span style={{
                           fontSize: Math.max(9, Math.min(14, zone.width / 7)),
                           fontFamily: 'var(--font-display)', fontWeight: 700,
-                          color: '#065f46', textAlign: 'center', padding: '0 4px',
+                          color: assign && obsoleteZoneIds.has(zone.id) ? '#dc2626' : '#065f46', textAlign: 'center', padding: '0 4px',
                           lineHeight: 1.2, wordBreak: 'break-word',
                         }}>
                           {assign.refName}
