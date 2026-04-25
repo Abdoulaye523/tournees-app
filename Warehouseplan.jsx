@@ -22,6 +22,7 @@ export default function WarehousePlan() {
   const [bgUploading, setBgUploading] = useState(false)
 
   const [drawing, setDrawing] = useState(false)
+  const [orderDragIdx, setOrderDragIdx] = useState(null)
   const [dragZone, setDragZone] = useState(null)
   const [startPos, setStartPos] = useState(null)
   const [currentRect, setCurrentRect] = useState(null)
@@ -56,7 +57,7 @@ export default function WarehousePlan() {
   }
 
   async function loadZones() {
-    const { data: zonesData } = await supabase.from('warehouse_zones').select('*').order('id')
+    const { data: zonesData } = await supabase.from('warehouse_zones').select('*').order('order_index').order('id')
     const { data: assignData } = await supabase
       .from('zone_assignments')
       .select('zone_id, reference_id, date_label, tours_references(id, name)')
@@ -130,7 +131,7 @@ export default function WarehousePlan() {
   }, [assignments, tourSlots])
 
   async function autoAssign() {
-    const freeZones = zones.filter(z => !assignments[z.id])
+    const freeZones = [...zones].sort((a, b) => (a.order_index ?? a.id) - (b.order_index ?? b.id)).filter(z => !assignments[z.id])
     const toAssign = [...unassigned]
     const newAssignments = {}
 
@@ -349,6 +350,18 @@ export default function WarehousePlan() {
     })
   }
 
+  async function reorderZones(fromIdx, toIdx) {
+    const reordered = [...zones]
+    const [moved] = reordered.splice(fromIdx, 1)
+    reordered.splice(toIdx, 0, moved)
+    const updated = reordered.map((z, i) => ({ ...z, order_index: i + 1 }))
+    setZones(updated)
+    // Sauvegarder en base
+    for (const z of updated) {
+      await supabase.from('warehouse_zones').update({ order_index: z.order_index }).eq('id', z.id)
+    }
+  }
+
   // Refs présentes dans le groupe sélectionné
   const groupRefIds = new Set(tourSlots.map(s => s.refId))
   const obsoleteZoneIds = new Set(
@@ -510,6 +523,11 @@ export default function WarehousePlan() {
                       handleDropOnZone(zone.id, data)
                     }}
                   >
+                    {/* Numéro d'ordre */}
+                    <span style={{ position: 'absolute', top: 2, left: 4, fontSize: 9, fontWeight: 700, color: 'var(--gray-400)', fontFamily: 'monospace' }}>
+                      #{zones.findIndex(z => z.id === zone.id) + 1}
+                    </span>
+
                     {assign ? (
                       <>
                         <span style={{
@@ -582,6 +600,52 @@ export default function WarehousePlan() {
             </span>
           </div>
         </div>
+
+        {/* Panneau ordre en mode édition */}
+        {mode === 'edit' && (
+          <div style={{ width: 220, flexShrink: 0 }}>
+            <div className="card" style={{ overflow: 'hidden' }}>
+              <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--gray-100)', background: 'var(--gray-50)' }}>
+                <span style={{ fontFamily: 'var(--font-display)', fontSize: 12, fontWeight: 700, color: 'var(--gray-700)' }}>
+                  Ordre de remplissage
+                </span>
+              </div>
+              <div style={{ padding: '8px', maxHeight: 500, overflowY: 'auto' }}>
+                {zones.map((zone, idx) => (
+                  <div
+                    key={zone.id}
+                    draggable
+                    onDragStart={() => setOrderDragIdx(idx)}
+                    onDragOver={e => e.preventDefault()}
+                    onDrop={() => {
+                      if (orderDragIdx !== null && orderDragIdx !== idx) {
+                        reorderZones(orderDragIdx, idx)
+                      }
+                      setOrderDragIdx(null)
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '7px 10px', marginBottom: 4,
+                      background: orderDragIdx === idx ? 'var(--accent-light)' : 'var(--white)',
+                      border: '1px solid var(--gray-200)',
+                      borderRadius: 'var(--radius-sm)',
+                      cursor: 'grab', fontSize: 12,
+                    }}
+                  >
+                    <span style={{ fontWeight: 700, color: 'var(--accent)', fontFamily: 'monospace', minWidth: 20 }}>#{idx + 1}</span>
+                    <span style={{ color: 'var(--gray-600)', flex: 1 }}>
+                      {assignments[zone.id]?.refName || <span style={{ color: 'var(--gray-300)' }}>vide</span>}
+                    </span>
+                    <span style={{ fontSize: 10, color: 'var(--gray-300)' }}>⠿</span>
+                  </div>
+                ))}
+                <p style={{ fontSize: 11, color: 'var(--gray-400)', textAlign: 'center', marginTop: 4 }}>
+                  Glissez pour réordonner
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Panneau tournées */}
         <div style={{ width: 220, flexShrink: 0 }}>
