@@ -25,7 +25,6 @@ export function AuthProvider({ children }) {
   }
 
   useEffect(() => {
-    // 1. Charger la session existante au démarrage
     supabase.auth.getSession().then(({ data: { session } }) => {
       initialized.current = true
       setUser(session?.user ?? null)
@@ -36,27 +35,27 @@ export function AuthProvider({ children }) {
       }
     })
 
-    // 2. Écouter les changements d'auth (login, logout, retour d'onglet)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (!initialized.current) return
 
-        // Si la session est restaurée après un changement d'onglet
-        if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') {
-          setUser(session?.user ?? null)
-          if (session?.user && !profile) {
+        if (event === 'SIGNED_OUT') {
+          setProfile(null)
+          setUser(null)
+          setLoading(false)
+          return
+        }
+
+        // Pour tous les autres events (TOKEN_REFRESHED, SIGNED_IN, etc.)
+        setUser(session?.user ?? null)
+        if (session?.user) {
+          // Ne recharger le profil que si on ne l'a pas déjà
+          if (!profile) {
             setLoading(true)
             await fetchProfile(session.user.id)
           } else {
             setLoading(false)
           }
-          return
-        }
-
-        setUser(session?.user ?? null)
-        if (session?.user) {
-          setLoading(true)
-          await fetchProfile(session.user.id)
         } else {
           setProfile(null)
           setLoading(false)
@@ -75,6 +74,7 @@ export function AuthProvider({ children }) {
   async function signOut() {
     setProfile(null)
     setUser(null)
+    setLoading(false)
     await supabase.auth.signOut()
   }
 
