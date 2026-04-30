@@ -10,33 +10,37 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchData()
-    // Refresh toutes les 30 secondes
     const interval = setInterval(fetchData, 30000)
     return () => clearInterval(interval)
   }, [])
 
   async function fetchData() {
-    const todayDate = new Date().toISOString().split('T')[0]
+    try {
+      const todayDate = new Date().toISOString().split('T')[0]
 
-    const { data: dashboard } = await supabase
-      .from('daily_dashboard')
-      .select('*')
-      .eq('delivery_date', todayDate)
-      .single()
+      const { data: dashboard } = await supabase
+        .from('daily_dashboard')
+        .select('*')
+        .eq('delivery_date', todayDate)
+        .maybeSingle()
 
-    const { data: tours } = await supabase
-      .from('tour_scan_summary')
-      .select('*')
-      .eq('archived', false)
-      .order('delivery_date', { ascending: false })
-      .limit(10)
+      const { data: tours } = await supabase
+        .from('tour_scan_summary')
+        .select('*')
+        .eq('archived', false)
+        .order('delivery_date', { ascending: false })
+        .limit(10)
 
-    setStats(dashboard || {
-      total_tours: 0, completed_tours: 0, in_progress_tours: 0, pending_tours: 0,
-      total_parcels: 0, scanned_parcels: 0, anomalies_wrong_tour: 0, anomalies_unknown: 0
-    })
-    setRecentTours(tours || [])
-    setLoading(false)
+      setStats(dashboard || {
+        total_tours: 0, completed_tours: 0, in_progress_tours: 0, pending_tours: 0,
+        total_parcels: 0, scanned_parcels: 0, anomalies_wrong_tour: 0, anomalies_unknown: 0
+      })
+      setRecentTours(tours || [])
+    } catch (e) {
+      console.error('Dashboard error:', e)
+    } finally {
+      setLoading(false)
+    }
   }
 
   function statusBadge(status) {
@@ -72,7 +76,6 @@ export default function Dashboard() {
       </div>
 
       <div className="page-body">
-        {/* Stats */}
         <div className="stats-grid">
           <div className="stat-card">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -117,7 +120,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Tournées récentes */}
         <div className="card">
           <div className="card-header">
             <span className="card-title">Tournées actives</span>
