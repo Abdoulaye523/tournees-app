@@ -357,12 +357,7 @@ export default function Tours() {
         )}
       </div>
 
-      <style>{\`
-        .btn-label-desktop { display: inline; margin-left: 4px; }
-        @media (max-width: 480px) {
-          .btn-label-desktop { display: none; }
-        }
-      \`}</style>
+      <style>{'.btn-label-desktop { display: inline; margin-left: 4px; } @media (max-width: 480px) { .btn-label-desktop { display: none; } }'}</style>
     </>
   )
 }
