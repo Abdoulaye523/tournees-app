@@ -52,8 +52,8 @@ export default function AdminLayout() {
       <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>
         <div className="sidebar-logo">
           <div>
-            <h1>CCV<span>.</span></h1>
-            <p>Administration</p>
+            <h1>Superflash</h1>
+            <p>Un outil DONEO pour être meilleur que le Blanc Mesnil</p>
           </div>
           <button className="sidebar-close" onClick={closeSidebar}>
             <X size={18} />
