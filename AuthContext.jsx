@@ -36,21 +36,28 @@ export function AuthProvider({ children }) {
       }
     })
 
-    // 2. Écouter les changements d'auth (login, logout)
+    // 2. Écouter les changements d'auth (login, logout, retour d'onglet)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        // Ignorer le premier événement si getSession l'a déjà traité
-        // pour éviter la double exécution au démarrage
         if (!initialized.current) return
 
-        setUser(session?.user ?? null)
+        // Si la session est restaurée après un changement d'onglet
+        if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') {
+          setUser(session?.user ?? null)
+          if (session?.user && !profile) {
+            setLoading(true)
+            await fetchProfile(session.user.id)
+          } else {
+            setLoading(false)
+          }
+          return
+        }
 
+        setUser(session?.user ?? null)
         if (session?.user) {
-          // Nouveau login — recharger le profil depuis la base
           setLoading(true)
           await fetchProfile(session.user.id)
         } else {
-          // Logout
           setProfile(null)
           setLoading(false)
         }
