@@ -49,12 +49,14 @@ export default function PreparationTournees() {
     setCompared(false)
 
     const [resA, resB] = await Promise.all([
-      supabase.from('tours').select('name').in('delivery_date_id', groupA),
-      supabase.from('tours').select('name').in('delivery_date_id', groupB),
+      supabase.from('tours').select('reference_id, tours_references(name)').in('delivery_date_id', groupA).not('reference_id', 'is', null),
+      supabase.from('tours').select('reference_id, tours_references(name)').in('delivery_date_id', groupB).not('reference_id', 'is', null),
     ])
 
-    const namesA = [...new Set((resA.data || []).map(t => t.name))].sort()
-    const namesB = [...new Set((resB.data || []).map(t => t.name))].sort()
+    console.log('resA data:', resA.data)
+    console.log('resB data:', resB.data)
+    const namesA = [...new Set((resA.data || []).filter(t => t.tours_references?.name).map(t => t.tours_references.name))].sort()
+    const namesB = [...new Set((resB.data || []).filter(t => t.tours_references?.name).map(t => t.tours_references.name))].sort()
 
     setToursA(namesA)
     setToursB(namesB)
