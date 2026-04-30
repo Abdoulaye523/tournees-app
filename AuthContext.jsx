@@ -8,6 +8,7 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
   const initialized = useRef(false)
+  const profileRef = useRef(null)
 
   async function fetchProfile(userId) {
     try {
@@ -16,8 +17,10 @@ export function AuthProvider({ children }) {
         .select('*')
         .eq('id', userId)
         .single()
+      profileRef.current = data || null
       setProfile(data || null)
     } catch (e) {
+      profileRef.current = null
       setProfile(null)
     } finally {
       setLoading(false)
@@ -40,23 +43,23 @@ export function AuthProvider({ children }) {
         if (!initialized.current) return
 
         if (event === 'SIGNED_OUT') {
+          profileRef.current = null
           setProfile(null)
           setUser(null)
           setLoading(false)
           return
         }
 
-        // Pour tous les autres events (TOKEN_REFRESHED, SIGNED_IN, etc.)
         setUser(session?.user ?? null)
         if (session?.user) {
-          // Ne recharger le profil que si on ne l'a pas déjà
-          if (!profile) {
+          if (!profileRef.current) {
             setLoading(true)
             await fetchProfile(session.user.id)
           } else {
             setLoading(false)
           }
         } else {
+          profileRef.current = null
           setProfile(null)
           setLoading(false)
         }
@@ -72,6 +75,7 @@ export function AuthProvider({ children }) {
   }
 
   async function signOut() {
+    profileRef.current = null
     setProfile(null)
     setUser(null)
     setLoading(false)
