@@ -84,7 +84,7 @@ export default function WarehousePlan() {
   async function loadTourSlots() {
     const { data: tours } = await supabase
       .from('tours')
-      .select('name, reference_id, delivery_date_id, tours_references(id, name), delivery_dates(delivery_date)')
+      .select('reference_id, delivery_date_id, tours_references(id, name), delivery_dates(delivery_date)')
       .in('delivery_date_id', groupDates)
 
     if (!tours) return
