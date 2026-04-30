@@ -340,16 +340,20 @@ export default function UploadPDF() {
     let totalParcels = 0
 
     for (const tour of tours) {
+      // Construire le nom : référence + date
+      const dateLabel = new Date(deliveryDate + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      const tourName = tour.referenceId ? `${tour.finalName} - ${dateLabel}` : `${tour.name || tour.finalName} - ${dateLabel}`
+
       const { data: tourData, error: tourError } = await supabase
         .from('tours')
         .upsert({
           delivery_date_id: dateData.id,
-          name: tour.finalName,
+          name: tourName,
           total_parcels: tour.parcels.length,
           excluded_parcels: tour.excluded.length,
           status: 'pending',
           reference_id: tour.referenceId || null,
-        }, { onConflict: 'delivery_date_id,name' })
+        }, { onConflict: 'reference_id,delivery_date_id' })
         .select().single()
 
       if (tourError) {
@@ -365,7 +369,7 @@ export default function UploadPDF() {
             excluded: false,
             exclusion_reason: p.isLivraisonContreReprise ? 'Livraison contre reprise' : null,
           })),
-          { onConflict: 'barcode', ignoreDuplicates: true }
+          { onConflict: 'barcode,tour_id', ignoreDuplicates: true }
         )
         totalParcels += tour.parcels.length
       }
@@ -378,7 +382,7 @@ export default function UploadPDF() {
             excluded: true,
             exclusion_reason: p.exclusionReason || 'Reprise',
           })),
-          { onConflict: 'barcode', ignoreDuplicates: true }
+          { onConflict: 'barcode,tour_id', ignoreDuplicates: true }
         )
       }
       totalTours++
