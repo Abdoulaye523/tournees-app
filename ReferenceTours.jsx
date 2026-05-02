@@ -7,6 +7,7 @@ export default function ReferenceTours() {
   const [refs, setRefs] = useState([])
   const [loading, setLoading] = useState(true)
   const [newName, setNewName] = useState('')
+  const [nameSupplier, setNameSupplier] = useState('')
   const [adding, setAdding] = useState(false)
 
   useEffect(() => { fetchRefs() }, [])
@@ -14,7 +15,7 @@ export default function ReferenceTours() {
   async function fetchRefs() {
     setLoading(true)
     const { data } = await supabase
-      .from('reference_tours')
+      .from('tours_references')
       .select('*')
       .order('name')
     setRefs(data || [])
@@ -25,12 +26,16 @@ export default function ReferenceTours() {
     const name = newName.trim()
     if (!name) return toast.error('Saisissez un nom de tournée.')
     setAdding(true)
-    const { error } = await supabase.from('reference_tours').insert({ name })
+    const { error } = await supabase.from('tours_references').insert({
+      name,
+      name_supplier: nameSupplier.trim() || null,
+    })
     if (error) {
       toast.error(error.code === '23505' ? 'Ce nom existe déjà.' : 'Erreur lors de l\'ajout.')
     } else {
       toast.success(`"${name}" ajouté.`)
       setNewName('')
+      setNameSupplier('')
       fetchRefs()
     }
     setAdding(false)
@@ -38,7 +43,7 @@ export default function ReferenceTours() {
 
   async function handleDelete(id, name) {
     if (!confirm(`Supprimer "${name}" ?`)) return
-    const { error } = await supabase.from('reference_tours').delete().eq('id', id)
+    const { error } = await supabase.from('tours_references').delete().eq('id', id)
     if (error) toast.error('Erreur lors de la suppression.')
     else { toast.success(`"${name}" supprimé.`); fetchRefs() }
   }
@@ -50,21 +55,30 @@ export default function ReferenceTours() {
         <p className="page-subtitle">Gérez la liste des noms officiels utilisés lors de l'import PDF</p>
       </div>
 
-      <div className="page-body" style={{ maxWidth: '560px' }}>
+      <div className="page-body" style={{ maxWidth: '640px' }}>
+
         {/* Formulaire ajout */}
         <div className="card" style={{ marginBottom: 20 }}>
           <div className="card-header">
             <span className="card-title">Ajouter un nom officiel</span>
           </div>
-          <div className="card-body">
-            <div style={{ display: 'flex', gap: 10 }}>
+          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <input
                 className="form-input"
-                placeholder="Ex : MNS75, TKN SOL, FC AD..."
+                placeholder="Nom officiel (ex : MNS75, TKN SOL...)"
                 value={newName}
                 onChange={e => setNewName(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleAdd()}
-                style={{ flex: 1 }}
+                style={{ flex: 1, minWidth: 160 }}
+              />
+              <input
+                className="form-input"
+                placeholder="Nom fournisseur (optionnel)"
+                value={nameSupplier}
+                onChange={e => setNameSupplier(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAdd()}
+                style={{ flex: 1, minWidth: 160 }}
               />
               <button
                 className="btn btn-primary"
@@ -75,7 +89,7 @@ export default function ReferenceTours() {
                 Ajouter
               </button>
             </div>
-            <p style={{ fontSize: 12, color: 'var(--gray-400)', marginTop: 8 }}>
+            <p style={{ fontSize: 12, color: 'var(--gray-400)', margin: 0 }}>
               Le matching se fait sans espaces (ex : "MNS 75" = "MNS75").
             </p>
           </div>
@@ -104,9 +118,16 @@ export default function ReferenceTours() {
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '10px 16px', borderBottom: '1px solid var(--gray-100)',
               }}>
-                <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, color: 'var(--gray-800)' }}>
-                  {ref.name}
-                </span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, color: 'var(--gray-800)' }}>
+                    {ref.name}
+                  </span>
+                  {ref.name_supplier && (
+                    <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>
+                      Fournisseur : {ref.name_supplier}
+                    </span>
+                  )}
+                </div>
                 <button
                   className="btn btn-ghost btn-sm"
                   onClick={() => handleDelete(ref.id, ref.name)}
@@ -119,6 +140,7 @@ export default function ReferenceTours() {
             ))
           )}
         </div>
+
       </div>
     </>
   )
