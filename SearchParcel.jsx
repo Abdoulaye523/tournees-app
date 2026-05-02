@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { supabase } from './supabase'
-import { Search, Package } from 'lucide-react'
+import { Search, Package, AlertTriangle, CheckCircle, XCircle, Clock } from 'lucide-react'
 
 export default function SearchParcel() {
   const [query, setQuery] = useState('')
@@ -13,8 +13,7 @@ export default function SearchParcel() {
     if (!query.trim()) return
     setLoading(true)
     setSearched(true)
-
-    const { data, error } = await supabase.rpc('search_parcel', { p_barcode: query.trim() })
+    const { data } = await supabase.rpc('search_parcel', { p_barcode: query.trim() })
     setResults(data || [])
     setLoading(false)
   }
@@ -56,53 +55,90 @@ export default function SearchParcel() {
         {loading && <div className="loading-center"><div className="spinner dark" /></div>}
 
         {!loading && searched && (
-          <div className="card">
-            {results.length === 0 ? (
+          results.length === 0 ? (
+            <div className="card">
               <div className="empty-state">
                 <Package size={36} className="empty-state-icon" />
                 <p className="empty-state-title">Aucun colis trouvé</p>
                 <p className="empty-state-sub">Vérifiez le numéro et réessayez.</p>
               </div>
-            ) : (
-              <div className="table-wrapper">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Barcode</th>
-                      <th>Tournée</th>
-                      <th>Date livraison</th>
-                      <th>Statut</th>
-                      <th>Dernier scan</th>
-                      <th>Scanné par</th>
-                      <th>Nbre scans</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {results.map((r, i) => (
-                      <tr key={i}>
-                        <td>
-                          <code style={{ fontFamily: 'monospace', fontSize: '13px', background: 'var(--gray-100)', padding: '2px 8px', borderRadius: '4px' }}>
-                            {r.barcode}
-                          </code>
-                          {r.excluded && <span className="badge badge-gray" style={{ marginLeft: '6px' }}>Reprise</span>}
-                        </td>
-                        <td><strong style={{ fontFamily: 'var(--font-display)' }}>{r.tour_name}</strong></td>
-                        <td>{r.delivery_date ? new Date(r.delivery_date + 'T12:00:00').toLocaleDateString('fr-FR') : '—'}</td>
-                        <td>{r.last_scan_result ? resultBadge(r.last_scan_result) : <span style={{ color: 'var(--gray-300)' }}>Non scanné</span>}</td>
-                        <td style={{ fontSize: '13px', color: 'var(--gray-500)' }}>
-                          {r.last_scan_at ? new Date(r.last_scan_at).toLocaleString('fr-FR') : '—'}
-                        </td>
-                        <td style={{ fontSize: '13px' }}>{r.last_scan_by || '—'}</td>
-                        <td style={{ textAlign: 'center' }}>
-                          <span style={{ fontWeight: 600 }}>{r.scan_count}</span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {results.map((r, i) => (
+                <div key={i} className="card" style={{ overflow: 'hidden' }}>
+                  {/* Header */}
+                  <div style={{ padding: '12px 16px', background: 'var(--gray-50)', borderBottom: '1px solid var(--gray-100)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                    <code style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 700, background: 'var(--gray-200)', padding: '3px 10px', borderRadius: 6 }}>
+                      {r.barcode}
+                    </code>
+                    {r.excluded && <span className="badge badge-gray">Reprise</span>}
+                    {r.was_missing && (
+                      <span className="badge badge-red" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <XCircle size={11} /> Manquant à l'archivage
+                      </span>
+                    )}
+                    {r.last_scan_result ? resultBadge(r.last_scan_result) : (
+                      <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>Non scanné</span>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 0 }}>
+                    {/* Tournée */}
+                    <div style={{ padding: '12px 16px', borderRight: '1px solid var(--gray-100)', borderBottom: '1px solid var(--gray-100)' }}>
+                      <div style={{ fontSize: 11, color: 'var(--gray-400)', marginBottom: 4 }}>Tournée</div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: 'var(--gray-800)' }}>
+                        {r.reference_name || r.tour_name}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 2 }}>
+                        {r.delivery_date ? new Date(r.delivery_date + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+                      </div>
+                    </div>
+
+                    {/* Dernier scan */}
+                    <div style={{ padding: '12px 16px', borderRight: '1px solid var(--gray-100)', borderBottom: '1px solid var(--gray-100)' }}>
+                      <div style={{ fontSize: 11, color: 'var(--gray-400)', marginBottom: 4 }}>Dernier scan</div>
+                      {r.last_scan_at ? (
+                        <>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-800)' }}>
+                            {new Date(r.last_scan_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--gray-400)' }}>
+                            {new Date(r.last_scan_at).toLocaleDateString('fr-FR')}
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{ fontSize: 13, color: 'var(--gray-300)' }}>—</div>
+                      )}
+                    </div>
+
+                    {/* Scanné par */}
+                    <div style={{ padding: '12px 16px', borderRight: '1px solid var(--gray-100)', borderBottom: '1px solid var(--gray-100)' }}>
+                      <div style={{ fontSize: 11, color: 'var(--gray-400)', marginBottom: 4 }}>Scanné par</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-800)' }}>
+                        {r.last_scan_by || <span style={{ color: 'var(--gray-300)' }}>—</span>}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 2 }}>
+                        {r.scan_count > 0 ? `${r.scan_count} scan${r.scan_count > 1 ? 's' : ''} au total` : 'Aucun scan'}
+                      </div>
+                    </div>
+
+                    {/* Mauvaise tournée */}
+                    {r.last_scan_result === 'wrong_tour' && r.wrong_tour_name && (
+                      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--gray-100)', background: '#fff5f5' }}>
+                        <div style={{ fontSize: 11, color: 'var(--red)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <AlertTriangle size={11} /> Scanned dans mauvaise tournée
+                        </div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--red)' }}>
+                          {r.wrong_tour_name}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
         )}
       </div>
     </>
