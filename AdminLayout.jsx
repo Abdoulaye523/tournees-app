@@ -45,13 +45,11 @@ export default function AdminLayout() {
 
   return (
     <div className="app-layout">
-      {/* Overlay mobile */}
       <div
         className={`sidebar-overlay${sidebarOpen ? ' open' : ''}`}
         onClick={closeSidebar}
       />
 
-      {/* Sidebar */}
       <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>
         <div className="sidebar-logo">
           <div>
@@ -64,8 +62,8 @@ export default function AdminLayout() {
         </div>
 
         <nav className="sidebar-nav">
-          <span className="sidebar-section-label">Principal</span>
-          {navItems.map(item => (
+          <span className="sidebar-section-label">Pilotage</span>
+          {navPilotage.map(item => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -78,8 +76,8 @@ export default function AdminLayout() {
             </NavLink>
           ))}
 
-          <span className="sidebar-section-label" style={{ marginTop: '8px' }}>Outils</span>
-          {navItems2.map(item => (
+          <span className="sidebar-section-label" style={{ marginTop: '8px' }}>Contrôle</span>
+          {navControle.map(item => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -90,8 +88,9 @@ export default function AdminLayout() {
               {item.label}
             </NavLink>
           ))}
-          <span className="sidebar-section-label" style={{ marginTop: '8px' }}>Analyse</span>
-          {navItems3.map(item => (
+
+          <span className="sidebar-section-label" style={{ marginTop: '8px' }}>Administratif</span>
+          {navAdmin.map(item => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -118,14 +117,12 @@ export default function AdminLayout() {
         </div>
       </aside>
 
-      {/* Main */}
       <main className="main-content">
-        {/* Topbar mobile */}
         <div className="mobile-topbar">
           <button className="btn-menu" onClick={() => setSidebarOpen(true)}>
             <Menu size={22} />
           </button>
-          <span className="mobile-topbar-logo">CCV<span>.</span></span>
+          <span className="mobile-topbar-logo">Superflash</span>
           <div className="user-avatar" style={{ width: 32, height: 32, fontSize: 11 }}>
             {initials}
           </div>
