@@ -5,26 +5,26 @@ import {
   LayoutDashboard, Truck, Upload, Users, Search, FileSearch, RotateCcw, LogOut, Menu, X, BookMarked, ClipboardList, Map, Activity, ShieldAlert, MailIcon
 } from 'lucide-react'
 
-const navItems = [
+const navPilotage = [
   { to: '/admin', label: 'Dashboard', icon: <LayoutDashboard size={16} />, end: true },
-  { to: '/admin/tours', label: 'Tournées', icon: <Truck size={16} /> },
-  { to: '/admin/upload', label: 'Importer un PDF', icon: <Upload size={16} /> },
-]
-
-const navItems2 = [
-  { to: '/admin/search-parcel', label: 'Recherche colis', icon: <Search size={16} /> },
-  { to: '/admin/search-tours', label: 'Recherche tournées', icon: <FileSearch size={16} /> },
-  { to: '/admin/users', label: 'Utilisateurs', icon: <Users size={16} /> },
-  { to: '/admin/reprises', label: 'Reprises', icon: <RotateCcw size={16} /> },
-  { to: '/admin/reference-tours', label: 'Tournées de référence', icon: <BookMarked size={16} /> },
-]
-
-const navItems3 = [
-  { to: '/admin/suivi-tournees', label: 'Suivi des tournées', icon: <Activity size={16} /> },
-  { to: '/admin/anomalies-reception', label: 'Anomalies réception', icon: <ShieldAlert size={16} /> },
-  { to: '/admin/email-recipients', label: 'Destinataires rapport', icon: <MailIcon size={16} /> },
   { to: '/admin/preparation-tournees', label: 'Préparation des tournées', icon: <ClipboardList size={16} /> },
   { to: '/admin/warehouse', label: 'Plan entrepôt', icon: <Map size={16} /> },
+  { to: '/admin/suivi-tournees', label: 'Suivi des tournées', icon: <Activity size={16} /> },
+  { to: '/admin/anomalies-reception', label: 'Anomalies réception', icon: <ShieldAlert size={16} /> },
+  { to: '/admin/reprises', label: 'Reprises', icon: <RotateCcw size={16} /> },
+]
+
+const navControle = [
+  { to: '/admin/tours', label: 'Tournées', icon: <Truck size={16} /> },
+  { to: '/admin/search-tours', label: 'Recherche tournées', icon: <FileSearch size={16} /> },
+  { to: '/admin/search-parcel', label: 'Recherche colis', icon: <Search size={16} /> },
+]
+
+const navAdmin = [
+  { to: '/admin/upload', label: 'Importer un PDF', icon: <Upload size={16} /> },
+  { to: '/admin/email-recipients', label: 'Destinataires rapport', icon: <MailIcon size={16} /> },
+  { to: '/admin/users', label: 'Utilisateurs', icon: <Users size={16} /> },
+  { to: '/admin/reference-tours', label: 'Tournées de référence', icon: <BookMarked size={16} /> },
 ]
 
 export default function AdminLayout() {
