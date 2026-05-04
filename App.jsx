@@ -15,6 +15,7 @@ import PreparationTournees from './PreparationTournees'
 import WarehousePlan from './WarehousePlan'
 import SuiviTournees from './SuiviTournees'
 import AnomaliesReception from './AnomaliesReception'
+import EmailRecipients from './EmailRecipients'
 import OperatorHome from './OperatorHome'
 import ScanPage from './ScanPage'
 
@@ -57,6 +58,7 @@ export default function App() {
         <Route path="warehouse" element={<WarehousePlan />} />
         <Route path="suivi-tournees" element={<SuiviTournees />} />
         <Route path="anomalies-reception" element={<AnomaliesReception />} />
+        <Route path="email-recipients" element={<EmailRecipients />} />
         <Route path="scan/:tourId" element={<ScanPage />} />
       </Route>
 
