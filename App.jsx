@@ -13,6 +13,7 @@ import Reprises from './Reprises'
 import ReferenceTours from './ReferenceTours'
 import PreparationTournees from './PreparationTournees'
 import WarehousePlan from './WarehousePlan'
+import SuiviTournees from './SuiviTournees'
 import OperatorHome from './OperatorHome'
 import ScanPage from './ScanPage'
 
@@ -53,6 +54,7 @@ export default function App() {
         <Route path="reference-tours" element={<ReferenceTours />} />
         <Route path="preparation-tournees" element={<PreparationTournees />} />
         <Route path="warehouse" element={<WarehousePlan />} />
+        <Route path="suivi-tournees" element={<SuiviTournees />} />
         <Route path="scan/:tourId" element={<ScanPage />} />
       </Route>
 
