@@ -14,6 +14,7 @@ export default function Tours() {
   const [detail, setDetail] = useState({})
   const [detailLoading, setDetailLoading] = useState(false)
   const [deletingDate, setDeletingDate] = useState(null)
+  const [validatingDate, setValidatingDate] = useState(null)
 
   useEffect(() => { fetchTours() }, [showArchived])
 
@@ -61,6 +62,71 @@ export default function Tours() {
       toast.error('Erreur lors de la suppression : ' + err.message)
     } finally {
       setDeletingDate(null)
+    }
+  }
+
+  async function validateControl(date, dateTours) {
+    if (!confirm(`Valider le contrôle du ${new Date(date + 'T12:00:00').toLocaleDateString('fr-FR')} ?\nLes colis non scannés seront marqués "Non réceptionné" et les tournées seront clôturées.`)) return
+
+    setValidatingDate(date)
+    try {
+      const tourIds = dateTours.map(t => t.tour_id)
+
+      // Récupérer les colis non scannés pour chaque tournée
+      for (const tourId of tourIds) {
+        // Récupérer les barcodes scannés (ok) pour cette tournée
+        const { data: scannedEvents } = await supabase
+          .from('scan_events')
+          .select('barcode_scanned')
+          .eq('tour_id', tourId)
+          .in('result_type', ['ok', 'already_scanned'])
+
+        const scannedBarcodes = new Set((scannedEvents || []).map(e => e.barcode_scanned))
+
+        // Récupérer tous les colis actifs de la tournée
+        const { data: parcels } = await supabase
+          .from('parcels')
+          .select('id, barcode')
+          .eq('tour_id', tourId)
+          .eq('excluded', false)
+
+        // Marquer les non scannés comme "Non réceptionné"
+        const unscannedIds = (parcels || [])
+          .filter(p => !scannedBarcodes.has(p.barcode))
+          .map(p => p.id)
+
+        if (unscannedIds.length > 0) {
+          await supabase
+            .from('parcels')
+            .update({ reception_status: 'Non réceptionné' })
+            .in('id', unscannedIds)
+        }
+
+        // Marquer les scannés comme "Réceptionné"
+        const scannedIds = (parcels || [])
+          .filter(p => scannedBarcodes.has(p.barcode))
+          .map(p => p.id)
+
+        if (scannedIds.length > 0) {
+          await supabase
+            .from('parcels')
+            .update({ reception_status: 'Réceptionné' })
+            .in('id', scannedIds)
+        }
+      }
+
+      // Passer toutes les tournées en completed
+      await supabase
+        .from('tours')
+        .update({ status: 'completed', archived: true })
+        .in('id', tourIds)
+
+      toast.success('Contrôle validé avec succès !')
+      fetchTours()
+    } catch (err) {
+      toast.error('Erreur lors de la validation : ' + err.message)
+    } finally {
+      setValidatingDate(null)
     }
   }
 
@@ -177,19 +243,34 @@ export default function Tours() {
                   {new Date(date + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
                 </span>
                 <span className="badge badge-gray">{dateTours.length}</span>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  style={{ marginLeft: 'auto', color: 'var(--red)', opacity: deletingDate === date ? 0.5 : 1 }}
-                  disabled={deletingDate === date}
-                  onClick={() => deleteImport(date, dateTours)}
-                  title="Supprimer cet import"
-                >
-                  {deletingDate === date
-                    ? <div className="spinner" style={{ width: 14, height: 14 }} />
-                    : <Trash2 size={14} />
-                  }
-                  <span style={{ marginLeft: 4, fontSize: 12 }}>Supprimer l'import</span>
-                </button>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                  <button
+                    className="btn btn-sm"
+                    style={{ background: '#f0fdf4', border: '1px solid #a7f3d0', color: '#059669', opacity: validatingDate === date ? 0.5 : 1 }}
+                    disabled={validatingDate === date}
+                    onClick={() => validateControl(date, dateTours)}
+                    title="Valider le contrôle"
+                  >
+                    {validatingDate === date
+                      ? <div className="spinner" style={{ width: 14, height: 14 }} />
+                      : <span>✓</span>
+                    }
+                    <span style={{ marginLeft: 4, fontSize: 12 }}>Valider le contrôle</span>
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ color: 'var(--red)', opacity: deletingDate === date ? 0.5 : 1 }}
+                    disabled={deletingDate === date}
+                    onClick={() => deleteImport(date, dateTours)}
+                    title="Supprimer cet import"
+                  >
+                    {deletingDate === date
+                      ? <div className="spinner" style={{ width: 14, height: 14 }} />
+                      : <Trash2 size={14} />
+                    }
+                    <span style={{ marginLeft: 4, fontSize: 12 }}>Supprimer l'import</span>
+                  </button>
+                </div>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
