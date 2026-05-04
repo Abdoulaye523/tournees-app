@@ -122,6 +122,25 @@ export default function Tours() {
         .in('id', tourIds)
 
       toast.success('Contrôle validé avec succès !')
+
+      // Envoyer le rapport par email
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+        const emailRes = await fetch(`${supabaseUrl}/functions/v1/send-daily-report`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        })
+        if (emailRes.ok) toast.success('Rapport envoyé par email !')
+        else toast.error('Contrôle validé mais erreur envoi email.')
+      } catch (emailErr) {
+        console.error('Erreur envoi email:', emailErr)
+      }
+
       fetchTours()
     } catch (err) {
       toast.error('Erreur lors de la validation : ' + err.message)
