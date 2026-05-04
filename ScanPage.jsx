@@ -131,31 +131,40 @@ export default function ScanPage() {
     const id = tourIdRef.current
 
     try {
-      // Chercher le colis
-      const { data: parcel, error: parcelError } = await supabase
+      // Chercher tous les colis avec ce barcode (toutes tournées confondues)
+      const { data: parcelsFound } = await supabase
         .from('parcels')
-        .select('id, tour_id, excluded, barcode, tours(name)')
+        .select('id, tour_id, excluded, barcode, tours(name, tours_references(name))')
         .eq('barcode', bc)
-        .single()
 
       let resultType, parcelId = null
       let realTourName = null
 
-      if (!parcel) {
+      if (!parcelsFound || parcelsFound.length === 0) {
         resultType = 'unknown'
-      } else if (parcel.excluded) {
-        resultType = 'unknown'
-        parcelId = parcel.id
-      } else if (parcel.tour_id !== id) {
-        resultType = 'wrong_tour'
-        parcelId = parcel.id
-        realTourName = parcel.tours ? parcel.tours.name : null
       } else {
-        resultType = scannedBarcodes.has(bc) ? 'already_scanned' : 'ok'
-        parcelId = parcel.id
+        // Priorité 1 : colis dans la tournée courante
+        const currentTourParcel = parcelsFound.find(p => p.tour_id === id)
+        // Priorité 2 : colis dans une autre tournée non exclu
+        const otherParcel = parcelsFound.find(p => p.tour_id !== id && !p.excluded)
+
+        if (currentTourParcel) {
+          if (currentTourParcel.excluded) {
+            resultType = 'unknown'
+            parcelId = currentTourParcel.id
+          } else {
+            resultType = scannedBarcodes.has(bc) ? 'already_scanned' : 'ok'
+            parcelId = currentTourParcel.id
+          }
+        } else if (otherParcel) {
+          resultType = 'wrong_tour'
+          parcelId = otherParcel.id
+          realTourName = otherParcel.tours?.tours_references?.name || otherParcel.tours?.name || null
+        } else {
+          resultType = 'unknown'
+        }
       }
 
-      // Log pour debug
       const insertData = {
         tour_id: id,
         parcel_id: parcelId,
@@ -163,7 +172,6 @@ export default function ScanPage() {
         barcode_scanned: bc,
         result_type: resultType,
       }
-      console.log('INSERT DATA:', insertData)
 
       if (!profile || !profile.id) {
         console.error('ERREUR: profile ou profile.id est null', profile)
@@ -178,8 +186,6 @@ export default function ScanPage() {
         console.error('INSERT ERROR:', insertError)
         return
       }
-
-      console.log('INSERT OK')
 
       // Mettre à jour l'état local
       if (resultType === 'ok') {
@@ -338,7 +344,6 @@ export default function ScanPage() {
       {/* Contenu */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
 
-        {/* TAB SCAN */}
         {activeTab === 'scan' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {manualMode ? (
@@ -396,7 +401,6 @@ export default function ScanPage() {
           </div>
         )}
 
-        {/* TAB COLIS — tous les colis de la tournée avec statut */}
         {activeTab === 'colis' && (
           <div className="card" style={{ overflow: 'hidden' }}>
             <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--gray-100)', display: 'flex', justifyContent: 'space-between' }}>
@@ -409,13 +413,7 @@ export default function ScanPage() {
                 const isScanned = scannedBarcodes.has(p.barcode)
                 return (
                   <div key={p.barcode} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid var(--gray-100)', background: isScanned ? '#f0fdf4' : undefined }}>
-                    <span style={{
-                      width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
-                      background: isScanned ? '#05996920' : 'var(--red-light)',
-                      color: isScanned ? '#059669' : 'var(--red)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 10, fontWeight: 700,
-                    }}>
+                    <span style={{ width: 18, height: 18, borderRadius: '50%', flexShrink: 0, background: isScanned ? '#05996920' : 'var(--red-light)', color: isScanned ? '#059669' : 'var(--red)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
                       {isScanned ? '✓' : '✗'}
                     </span>
                     <code style={{ fontSize: 12, color: 'var(--gray-600)', flex: 1 }}>{p.barcode}</code>
@@ -429,7 +427,6 @@ export default function ScanPage() {
           </div>
         )}
 
-        {/* TAB SCANNÉS */}
         {activeTab === 'scanned' && (
           <div className="card" style={{ overflow: 'hidden' }}>
             <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--gray-100)', display: 'flex', justifyContent: 'space-between' }}>
@@ -449,7 +446,6 @@ export default function ScanPage() {
           </div>
         )}
 
-        {/* TAB MANQUANTS */}
         {activeTab === 'missing' && (
           <div className="card" style={{ overflow: 'hidden' }}>
             <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--gray-100)', display: 'flex', justifyContent: 'space-between', background: missing > 0 ? 'var(--red-light)' : 'var(--green-light)' }}>
@@ -468,7 +464,6 @@ export default function ScanPage() {
           </div>
         )}
 
-        {/* TAB ANOMALIES */}
         {activeTab === 'anomalies' && (
           <div className="card" style={{ overflow: 'hidden' }}>
             <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--gray-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: anomalies > 0 ? 'var(--red-light)' : undefined }}>
