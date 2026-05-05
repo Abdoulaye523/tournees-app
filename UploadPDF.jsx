@@ -151,10 +151,10 @@ function parsePDFText(text) {
       continue
     }
 
-    if (line.match(/^(Type\s+prestation|Référence|Créneau|Quantité|Imprimé|POIDS|LETTRE DE VOITURE|Réserves|commentaires|©|Emargement)/i)) continue
+    if (line.match(/^(Type\s+prestation|Référence|Quantité|Imprimé|POIDS|LETTRE DE VOITURE|Réserves|commentaires|©|Emargement)/i)) continue
     if (line.match(/^\d+\s*\/\s*\d+$/)) continue
-    // Extraire l'heure de première livraison
-    const heureMatch = line.match(/^(\d{2}:\d{2})\s*-\s*\d{2}:\d{2}/)
+    // Extraire l'heure de première livraison (format: "HH:MM - HH:MM" ou "Créneau HH:MM - HH:MM")
+    const heureMatch = line.match(/(?:Créneau\s*)?(\d{2}:\d{2})\s*-\s*\d{2}:\d{2}/i)
     if (heureMatch) {
       const t = tours[currentTourName]
       if (t && !t.heurePremiereLivraison) {
