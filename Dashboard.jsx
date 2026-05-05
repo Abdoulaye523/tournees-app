@@ -16,17 +16,21 @@ export default function Dashboard() {
 
   async function fetchData() {
     try {
-      const todayDate = new Date().toISOString().split('T')[0]
+      // Chercher la prochaine date de livraison (J+1)
+      const tomorrow = new Date()
+      tomorrow.setDate(tomorrow.getDate() + 1)
+      const tomorrowDate = tomorrow.toISOString().split('T')[0]
 
       const { data: dashboard } = await supabase
         .from('daily_dashboard')
         .select('*')
-        .eq('delivery_date', todayDate)
+        .eq('delivery_date', tomorrowDate)
         .maybeSingle()
 
       const { data: tours } = await supabase
         .from('tour_scan_summary')
         .select('*')
+        .eq('delivery_date', tomorrowDate)
         .eq('archived', false)
         .order('delivery_date', { ascending: false })
         .limit(10)
@@ -70,7 +74,7 @@ export default function Dashboard() {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="page-title">Dashboard</h2>
-            <p className="page-subtitle" style={{ textTransform: 'capitalize' }}>{today}</p>
+            <p className="page-subtitle" style={{ textTransform: 'capitalize' }}>Préparation du {new Date(new Date().setDate(new Date().getDate() + 1)).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
           </div>
         </div>
       </div>
