@@ -49,26 +49,39 @@ export default function PreparationTournees() {
     setCompared(false)
 
     const [resA, resB] = await Promise.all([
-      supabase.from('tours').select('reference_id, tours_references(name)').in('delivery_date_id', groupA).not('reference_id', 'is', null),
-      supabase.from('tours').select('reference_id, tours_references(name)').in('delivery_date_id', groupB).not('reference_id', 'is', null),
+      supabase.from('tours').select('reference_id, type_livraison, heure_premiere_livraison, tours_references(name)').in('delivery_date_id', groupA).not('reference_id', 'is', null),
+      supabase.from('tours').select('reference_id, type_livraison, heure_premiere_livraison, tours_references(name)').in('delivery_date_id', groupB).not('reference_id', 'is', null),
     ])
 
-    console.log('resA data:', resA.data)
-    console.log('resB data:', resB.data)
-    const namesA = [...new Set((resA.data || []).filter(t => t.tours_references?.name).map(t => t.tours_references.name))].sort()
-    const namesB = [...new Set((resB.data || []).filter(t => t.tours_references?.name).map(t => t.tours_references.name))].sort()
+    // Dédupliquer par nom de référence et garder LV + heure
+    const dedup = (data) => {
+      const seen = {}
+      for (const t of (data || [])) {
+        if (!t.tours_references?.name) continue
+        const name = t.tours_references.name
+        if (!seen[name]) seen[name] = { name, typeLivraison: t.type_livraison, heure: t.heure_premiere_livraison }
+      }
+      return Object.values(seen).sort((a, b) => {
+        if (a.heure && b.heure) return a.heure.localeCompare(b.heure)
+        if (a.heure) return -1
+        if (b.heure) return 1
+        return a.name.localeCompare(b.name)
+      })
+    }
+    const toursDataA = dedup(resA.data)
+    const toursDataB = dedup(resB.data)
 
-    setToursA(namesA)
-    setToursB(namesB)
+    setToursA(toursDataA)
+    setToursB(toursDataB)
     setCompared(true)
     setLoading(false)
   }
 
-  const setA = new Set(toursA)
-  const setB = new Set(toursB)
-  const added = toursB.filter(n => !setA.has(n))
-  const removed = toursA.filter(n => !setB.has(n))
-  const unchanged = toursA.filter(n => setB.has(n))
+  const setA = new Set(toursA.map ? toursA.map(t => t.name || t) : toursA)
+  const setB = new Set(toursB.map ? toursB.map(t => t.name || t) : toursB)
+  const added = (toursB.filter ? toursB : []).filter(t => !setA.has(t.name || t))
+  const removed = (toursA.filter ? toursA : []).filter(t => !setB.has(t.name || t))
+  const unchanged = (toursA.filter ? toursA : []).filter(t => setB.has(t.name || t))
 
   function GroupSelector({ group, setGroup, label }) {
     return (
@@ -167,10 +180,12 @@ export default function PreparationTournees() {
                     </div>
                     {added.length === 0
                       ? <div style={{ padding: '24px', textAlign: 'center', color: 'var(--gray-400)', fontSize: 13 }}>Aucune tournée ajoutée</div>
-                      : added.map(name => (
-                        <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 16px', borderBottom: '1px solid var(--gray-100)' }}>
+                      : added.map(t => (
+                        <div key={t.name || t} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 16px', borderBottom: '1px solid var(--gray-100)' }}>
                           <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#059669', flexShrink: 0 }} />
-                          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13, color: '#059669' }}>{name}</span>
+                          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13, color: '#059669', flex: 1 }}>{t.name || t}</span>
+                          {t.typeLivraison && <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 100, background: '#eff6ff', color: '#2563eb' }}>{t.typeLivraison}</span>}
+                          {t.heure && <span style={{ fontSize: 10, color: 'var(--gray-400)' }}>{t.heure}</span>}
                         </div>
                       ))
                     }
@@ -186,10 +201,12 @@ export default function PreparationTournees() {
                     </div>
                     {removed.length === 0
                       ? <div style={{ padding: '24px', textAlign: 'center', color: 'var(--gray-400)', fontSize: 13 }}>Aucune tournée retirée</div>
-                      : removed.map(name => (
-                        <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 16px', borderBottom: '1px solid var(--gray-100)' }}>
+                      : removed.map(t => (
+                        <div key={t.name || t} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 16px', borderBottom: '1px solid var(--gray-100)' }}>
                           <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--red)', flexShrink: 0 }} />
-                          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13, color: 'var(--red)' }}>{name}</span>
+                          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13, color: 'var(--red)', flex: 1 }}>{t.name || t}</span>
+                          {t.typeLivraison && <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 100, background: '#fee2e2', color: '#dc2626' }}>{t.typeLivraison}</span>}
+                          {t.heure && <span style={{ fontSize: 10, color: 'var(--gray-400)' }}>{t.heure}</span>}
                         </div>
                       ))
                     }
@@ -205,10 +222,12 @@ export default function PreparationTournees() {
                     </div>
                     {unchanged.length === 0
                       ? <div style={{ padding: '24px', textAlign: 'center', color: 'var(--gray-400)', fontSize: 13 }}>Aucune tournée commune</div>
-                      : unchanged.map(name => (
-                        <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 16px', borderBottom: '1px solid var(--gray-100)' }}>
+                      : unchanged.map(t => (
+                        <div key={t.name || t} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 16px', borderBottom: '1px solid var(--gray-100)' }}>
                           <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--gray-300)', flexShrink: 0 }} />
-                          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13, color: 'var(--gray-600)' }}>{name}</span>
+                          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13, color: 'var(--gray-600)', flex: 1 }}>{t.name || t}</span>
+                          {t.typeLivraison && <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 100, background: '#f3f4f6', color: '#6b7280' }}>{t.typeLivraison}</span>}
+                          {t.heure && <span style={{ fontSize: 10, color: 'var(--gray-400)' }}>{t.heure}</span>}
                         </div>
                       ))
                     }
