@@ -69,6 +69,8 @@ export default function WarehousePlan() {
           refId: a.tours_references.id,
           refName: a.tours_references.name,
           dateLabel: a.date_label || null,
+          typeLivraison: null,
+          heure: null,
         }
       }
     }
@@ -84,7 +86,7 @@ export default function WarehousePlan() {
   async function loadTourSlots() {
     const { data: tours } = await supabase
       .from('tours')
-      .select('reference_id, delivery_date_id, tours_references(id, name), delivery_dates(delivery_date)')
+      .select('reference_id, delivery_date_id, type_livraison, heure_premiere_livraison, tours_references(id, name), delivery_dates(delivery_date)')
       .in('delivery_date_id', groupDates)
 
     if (!tours) return
@@ -109,6 +111,8 @@ export default function WarehousePlan() {
         date: t.delivery_date_id,
         dateLabel,
         slotKey: key,
+        typeLivraison: t.type_livraison || null,
+        heure: t.heure_premiere_livraison || null,
       })
     }
 
@@ -543,6 +547,11 @@ export default function WarehousePlan() {
                             ({assign.dateLabel})
                           </span>
                         )}
+                        {(assign.typeLivraison || assign.heure) && (
+                          <span style={{ fontSize: 8, color: '#64748b', marginTop: 1, textAlign: 'center' }}>
+                            {assign.typeLivraison}{assign.typeLivraison && assign.heure ? ' · ' : ''}{assign.heure}
+                          </span>
+                        )}
                         {mode === 'view' && (
                           <button
                             style={{ position: 'absolute', top: 2, right: 2, background: 'none', border: 'none', cursor: 'pointer', opacity: 0.4, padding: 2 }}
@@ -684,6 +693,11 @@ export default function WarehousePlan() {
                     {slot.showDate && (
                       <div style={{ fontSize: 10, color: 'var(--accent)', opacity: 0.7, marginTop: 1 }}>
                         ({slot.dateLabel})
+                      </div>
+                    )}
+                    {(slot.typeLivraison || slot.heure) && (
+                      <div style={{ fontSize: 10, color: 'var(--gray-400)', marginTop: 1 }}>
+                        {slot.typeLivraison}{slot.typeLivraison && slot.heure ? ' · ' : ''}{slot.heure}
                       </div>
                     )}
                   </div>
