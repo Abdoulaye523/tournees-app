@@ -90,7 +90,7 @@ function parsePDFText(text) {
       } else {
         seenTours.add(name)
         currentTourName = name; skip = false; inChargement = false
-        if (!tours[name]) tours[name] = { name, parcels: [], excluded: [] }
+        if (!tours[name]) tours[name] = { name, parcels: [], excluded: [], typeLivraison: null, heurePremiereLivraison: null }
       }
       continue
     }
@@ -120,7 +120,7 @@ function parsePDFText(text) {
       } else {
         seenTours.add(name)
         currentTourName = name; skip = false; inChargement = false
-        if (!tours[name]) tours[name] = { name, parcels: [], excluded: [] }
+        if (!tours[name]) tours[name] = { name, parcels: [], excluded: [], typeLivraison: null, heurePremiereLivraison: null }
       }
       continue
     }
@@ -153,9 +153,26 @@ function parsePDFText(text) {
 
     if (line.match(/^(Type\s+prestation|Référence|Créneau|Quantité|Imprimé|POIDS|LETTRE DE VOITURE|Réserves|commentaires|©|Emargement)/i)) continue
     if (line.match(/^\d+\s*\/\s*\d+$/)) continue
-    if (line.match(/^\d{2}:\d{2}\s*-\s*\d{2}:\d{2}/)) continue
+    // Extraire l'heure de première livraison
+    const heureMatch = line.match(/^(\d{2}:\d{2})\s*-\s*\d{2}:\d{2}/)
+    if (heureMatch) {
+      const t = tours[currentTourName]
+      if (t && !t.heurePremiereLivraison) {
+        t.heurePremiereLivraison = heureMatch[1]
+      }
+      continue
+    }
 
     if (!line.match(/LV[123]_/)) continue
+
+    // Extraire le type LV
+    const lvMatch = line.match(/LV([123])_/)
+    if (lvMatch && currentTourName) {
+      const t = tours[currentTourName]
+      if (t && !t.typeLivraison) {
+        t.typeLivraison = 'LV' + lvMatch[1]
+      }
+    }
 
     const lastBarcodeMatch = line.match(/(\d{9,15})\s*$/)
     if (!lastBarcodeMatch) continue
@@ -268,7 +285,7 @@ export default function UploadPDF() {
       for (const tour of parsedTours) {
         const result = matchTourName(tour.name, referenceList || [])
         if (result.matched) {
-          matched.push({ ...tour, finalName: result.officialName, referenceId: result.referenceId })
+          matched.push({ ...tour, finalName: result.officialName, referenceId: result.referenceId, typeLivraison: tour.typeLivraison, heurePremiereLivraison: tour.heurePremiereLivraison })
         } else {
           unmatched.push({ rawName: tour.name, manualName: '', parcels: tour.parcels, excluded: tour.excluded })
         }
@@ -320,6 +337,8 @@ export default function UploadPDF() {
           referenceId: refData ? refData.id : null,
           parcels: t.parcels,
           excluded: t.excluded,
+          typeLivraison: t.typeLivraison,
+          heurePremiereLivraison: t.heurePremiereLivraison,
         })
       }
 
@@ -353,6 +372,8 @@ export default function UploadPDF() {
           excluded_parcels: tour.excluded.length,
           status: 'pending',
           reference_id: tour.referenceId || null,
+          type_livraison: tour.typeLivraison || null,
+          heure_premiere_livraison: tour.heurePremiereLivraison || null,
         }, { onConflict: 'reference_id,delivery_date_id' })
         .select().single()
 
