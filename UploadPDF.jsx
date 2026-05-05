@@ -208,7 +208,12 @@ function matchTourName(rawName, referenceList) {
 export default function UploadPDF() {
   const { profile } = useAuth()
   const [file, setFile] = useState(null)
-  const [deliveryDate, setDeliveryDate] = useState('')
+  const getDefaultDate = () => {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    return d.toISOString().split('T')[0]
+  }
+  const [deliveryDate, setDeliveryDate] = useState(getDefaultDate())
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState('')
   const [result, setResult] = useState(null)
