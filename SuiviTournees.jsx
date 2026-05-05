@@ -24,10 +24,10 @@ export default function SuiviTournees() {
 
     const { data } = await supabase
       .from('tours')
-      .select('id, name, status, retard, heure_retour, reference_id, tours_references(name)')
+      .select('id, name, status, retard, heure_retour, reference_id, type_livraison, heure_premiere_livraison, tours_references(name)')
       .eq('delivery_date_id', dateData.id)
       .is('heure_retour', null)
-      .order('name')
+      .order('heure_premiere_livraison', { ascending: true, nullsFirst: false })
 
     setTours(data || [])
     setLoading(false)
@@ -111,8 +111,20 @@ export default function SuiviTournees() {
                   <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                     {/* Nom */}
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 16, color: 'var(--gray-800)' }}>
-                        {refName}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 16, color: 'var(--gray-800)' }}>
+                          {refName}
+                        </span>
+                        {t.type_livraison && (
+                          <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 100, background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe' }}>
+                            {t.type_livraison}
+                          </span>
+                        )}
+                        {t.heure_premiere_livraison && (
+                          <span style={{ fontSize: 11, color: 'var(--gray-500)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                            <Clock size={11} /> {t.heure_premiere_livraison}
+                          </span>
+                        )}
                       </div>
                       {t.retard && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
