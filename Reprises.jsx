@@ -4,7 +4,7 @@ import { RotateCcw, ArrowLeftRight } from 'lucide-react'
 
 export default function Reprises() {
   const [reprises, setReprises] = useState([])
-  const [lcr, setLcr] = useState([]) // Livraisons contre reprise
+  const [lcr, setLcr] = useState([])
   const [loading, setLoading] = useState(true)
   const [filterDate, setFilterDate] = useState(() => {
     const tomorrow = new Date()
@@ -19,8 +19,9 @@ export default function Reprises() {
 
     const { data } = await supabase
       .from('parcels')
-      .select('barcode, excluded, exclusion_reason, tours(name, delivery_dates(delivery_date))')
+      .select('barcode, excluded, exclusion_reason, dea, tours(name, delivery_dates(delivery_date))')
       .or('exclusion_reason.eq.Reprise,exclusion_reason.eq.Livraison contre reprise')
+      .eq('dea', false)
       .order('barcode')
 
     const filtered = (data || []).filter(p => {
@@ -33,7 +34,6 @@ export default function Reprises() {
     setLoading(false)
   }
 
-  // Grouper par tournée
   function groupByTour(items) {
     return items.reduce((acc, p) => {
       const name = p.tours?.name || 'Inconnue'
@@ -92,8 +92,6 @@ export default function Reprises() {
       </div>
 
       <div className="page-body">
-
-        {/* Filtre date */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px', flexWrap: 'wrap' }}>
           <div className="form-group" style={{ margin: 0 }}>
             <label className="form-label">Date de livraison</label>
@@ -121,7 +119,6 @@ export default function Reprises() {
           <div className="loading-center"><div className="spinner dark" /></div>
         ) : (
           <>
-            {/* Section 1 : Reprises */}
             <div style={{ marginBottom: '32px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
                 <div style={{ width: 32, height: 32, borderRadius: '8px', background: 'var(--orange-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -137,7 +134,6 @@ export default function Reprises() {
                 </div>
                 <span className="badge badge-orange" style={{ marginLeft: 'auto' }}>{reprises.length}</span>
               </div>
-
               {reprises.length === 0 ? (
                 <div className="card">
                   <div className="empty-state" style={{ padding: '32px' }}>
@@ -148,7 +144,6 @@ export default function Reprises() {
               ) : renderTable(reprises)}
             </div>
 
-            {/* Section 2 : Livraisons contre reprise */}
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
                 <div style={{ width: 32, height: 32, borderRadius: '8px', background: 'var(--blue-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -164,7 +159,6 @@ export default function Reprises() {
                 </div>
                 <span className="badge badge-blue" style={{ marginLeft: 'auto' }}>{lcr.length}</span>
               </div>
-
               {lcr.length === 0 ? (
                 <div className="card">
                   <div className="empty-state" style={{ padding: '32px' }}>
