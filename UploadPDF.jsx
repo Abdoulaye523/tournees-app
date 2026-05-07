@@ -174,6 +174,9 @@ function parsePDFText(text) {
       }
     }
 
+    // Détecter DEA_ENLEVEMENT sur la même ligne
+    const isDea = line.includes('DEA_ENLEVEMENT')
+
     const lastBarcodeMatch = line.match(/(\d{9,15})\s*$/)
     if (!lastBarcodeMatch) continue
 
@@ -186,7 +189,7 @@ function parsePDFText(text) {
       const t = tours[currentTourName]
       const exists = t.parcels.some(p => p.barcode === bc)
         || t.excluded.some(p => p.barcode === bc)
-      if (!exists) t.parcels.push({ barcode: bc })
+      if (!exists) t.parcels.push({ barcode: bc, dea: isDea || false })
     }
   }
 
