@@ -62,7 +62,6 @@ function extractTourName(raw) {
     .replace(/\s+/g, ' ')
 }
 
-// Normalise un nom pour comparaison (sans espaces, minuscules)
 function normalize(str) {
   return str.replace(/\s+/g, '').toLowerCase()
 }
@@ -153,6 +152,7 @@ function parsePDFText(text) {
 
     if (line.match(/^(Type\s+prestation|Référence|Quantité|Imprimé|POIDS|LETTRE DE VOITURE|Réserves|commentaires|©|Emargement)/i)) continue
     if (line.match(/^\d+\s*\/\s*\d+$/)) continue
+
     // Extraire l'heure de première livraison (format: "HH:MM - HH:MM" ou "Créneau HH:MM - HH:MM")
     const heureMatch = line.match(/(?:Créneau\s*)?(\d{2}:\d{2})\s*-\s*\d{2}:\d{2}/i)
     if (heureMatch) {
@@ -197,11 +197,10 @@ function parsePDFText(text) {
 }
 
 // ─── MATCHING avec reference_tours ───────────────────────────────────────────
-// Retourne { matched: true, officialName } ou { matched: false, rawName }
 function matchTourName(rawName, referenceList) {
   const normalizedRaw = normalize(rawName)
   const found = [...referenceList]
-    .sort((a, b) => b.name.length - a.name.length) // priorité au plus long match
+    .sort((a, b) => b.name.length - a.name.length)
     .find(ref => normalizedRaw.includes(normalize(ref.name)))
   if (found) return { matched: true, officialName: found.name, referenceId: found.id }
   return { matched: false, rawName }
@@ -223,9 +222,8 @@ export default function UploadPDF() {
   const [dragover, setDragover] = useState(false)
   const inputRef = useRef()
 
-  // État pour la résolution manuelle des tournées sans match
-  const [unmatchedTours, setUnmatchedTours] = useState([]) // [{ rawName, manualName, parcels, excluded }]
-  const [pendingData, setPendingData] = useState(null) // données en attente de résolution
+  const [unmatchedTours, setUnmatchedTours] = useState([])
+  const [pendingData, setPendingData] = useState(null)
   const [resolving, setResolving] = useState(false)
 
   const tomorrow = new Date()
@@ -285,21 +283,18 @@ export default function UploadPDF() {
         .from('tours_references')
         .select('id, name')
 
-
-      // Matcher chaque tournée
       const matched = []
       const unmatched = []
 
       for (const tour of parsedTours) {
         const result = matchTourName(tour.name, referenceList || [])
         if (result.matched) {
-          matched.push({ ...tour, finalName: result.officialName, referenceId: result.referenceId, typeLivraison: tour.typeLivraison, heurePremiereLivraison: tour.heurePremiereLivraison })
+          matched.push({ ...tour, finalName: result.officialName, referenceId: result.referenceId })
         } else {
-          unmatched.push({ rawName: tour.name, manualName: '', parcels: tour.parcels, excluded: tour.excluded })
+          unmatched.push({ rawName: tour.name, manualName: '', parcels: tour.parcels, excluded: tour.excluded, typeLivraison: tour.typeLivraison, heurePremiereLivraison: tour.heurePremiereLivraison })
         }
       }
 
-      // Si des tournées n'ont pas de match → demander input manuel
       if (unmatched.length > 0) {
         setUnmatchedTours(unmatched)
         setPendingData({ dateData, uploadRecord, matched })
@@ -308,7 +303,6 @@ export default function UploadPDF() {
         return
       }
 
-      // Sinon tout est matché → on insère directement
       await insertTours(matched, dateData, uploadRecord)
 
     } catch (err) {
@@ -322,7 +316,6 @@ export default function UploadPDF() {
   }
 
   async function handleResolveUnmatched() {
-    // Vérifier que tous les inputs manuels sont remplis
     const missing = unmatchedTours.filter(t => !t.manualName.trim())
     if (missing.length > 0) {
       toast.error('Veuillez saisir un nom pour chaque tournée non reconnue.')
@@ -334,7 +327,6 @@ export default function UploadPDF() {
       const resolvedTours = []
       for (const t of unmatchedTours) {
         const finalName = t.manualName.trim()
-        // Créer la ligne dans tours_references
         const { data: refData } = await supabase
           .from('tours_references')
           .upsert({ name: finalName }, { onConflict: 'name' })
@@ -367,7 +359,6 @@ export default function UploadPDF() {
     let totalParcels = 0
 
     for (const tour of tours) {
-      // Construire le nom : référence + date
       const dateLabel = new Date(deliveryDate + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
       const tourName = tour.referenceId ? `${tour.finalName} - ${dateLabel}` : `${tour.name || tour.finalName} - ${dateLabel}`
 
@@ -396,6 +387,7 @@ export default function UploadPDF() {
             tour_id: tourData.id,
             barcode: p.barcode,
             excluded: false,
+            dea: p.dea || false,
             exclusion_reason: p.isLivraisonContreReprise ? 'Livraison contre reprise' : null,
           })),
           { onConflict: 'barcode,tour_id', ignoreDuplicates: true }
@@ -409,6 +401,7 @@ export default function UploadPDF() {
             tour_id: tourData.id,
             barcode: p.barcode,
             excluded: true,
+            dea: p.dea || false,
             exclusion_reason: p.exclusionReason || 'Reprise',
           })),
           { onConflict: 'barcode,tour_id', ignoreDuplicates: true }
@@ -499,7 +492,6 @@ export default function UploadPDF() {
               </div>
             )}
 
-            {/* ── Résolution manuelle des tournées non matchées ── */}
             {unmatchedTours.length > 0 && (
               <div style={{
                 padding: '16px 20px', borderRadius: 'var(--radius-sm)',
