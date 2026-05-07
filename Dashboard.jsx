@@ -6,6 +6,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null)
   const [recentTours, setRecentTours] = useState([])
   const [loading, setLoading] = useState(true)
+  const [nextDate, setNextDate] = useState('')
   const today = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
 
   useEffect(() => {
@@ -16,30 +17,43 @@ export default function Dashboard() {
 
   async function fetchData() {
     try {
-      // Chercher la prochaine date de livraison (J+1)
-      const tomorrow = new Date()
-      tomorrow.setDate(tomorrow.getDate() + 1)
-      const tomorrowDate = tomorrow.toISOString().split('T')[0]
-
-      const { data: dashboard } = await supabase
-        .from('daily_dashboard')
-        .select('*')
-        .eq('delivery_date', tomorrowDate)
-        .maybeSingle()
-
       const { data: tours } = await supabase
         .from('tour_scan_summary')
         .select('*')
-        .eq('delivery_date', tomorrowDate)
         .eq('archived', false)
-        .order('delivery_date', { ascending: false })
-        .limit(10)
+        .order('delivery_date', { ascending: true })
 
-      setStats(dashboard || {
-        total_tours: 0, completed_tours: 0, in_progress_tours: 0, pending_tours: 0,
-        total_parcels: 0, scanned_parcels: 0, anomalies_wrong_tour: 0, anomalies_unknown: 0
-      })
-      setRecentTours(tours || [])
+      // Calculer les stats depuis les tournées non archivées
+      const allTours = tours || []
+      const total_parcels = allTours.reduce((s, t) => s + (t.total_parcels || 0), 0)
+      const scanned_parcels = allTours.reduce((s, t) => s + (t.scanned_count || 0), 0)
+      const anomalies_wrong_tour = allTours.reduce((s, t) => s + (t.wrong_tour_count || 0), 0)
+      const anomalies_unknown = allTours.reduce((s, t) => s + (t.unknown_count || 0), 0)
+      const completed_tours = allTours.filter(t => t.status === 'completed').length
+      const in_progress_tours = allTours.filter(t => t.status === 'in_progress').length
+      const pending_tours = allTours.filter(t => t.status === 'pending').length
+
+      const dashboard = {
+        total_tours: allTours.length,
+        completed_tours,
+        in_progress_tours,
+        pending_tours,
+        total_parcels,
+        scanned_parcels,
+        anomalies_wrong_tour,
+        anomalies_unknown,
+      }
+
+      // Prochaine date disponible
+      const nextD = allTours[0]?.delivery_date
+      if (nextD) setNextDate(nextD)
+
+      const tomorrowDate = nextD
+
+      // tours already fetched above
+
+      setStats(dashboard)
+      setRecentTours(allTours.slice(0, 10))
     } catch (e) {
       console.error('Dashboard error:', e)
     } finally {
@@ -74,7 +88,7 @@ export default function Dashboard() {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="page-title">Dashboard</h2>
-            <p className="page-subtitle" style={{ textTransform: 'capitalize' }}>Préparation du {new Date(new Date().setDate(new Date().getDate() + 1)).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+            <p className="page-subtitle" style={{ textTransform: 'capitalize' }}>Préparation du {nextDate ? new Date(nextDate + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) : '...'}</p>
           </div>
         </div>
       </div>
