@@ -296,12 +296,10 @@ export default function UploadPDF() {
       // Vérifier si la date du PDF correspond à la date de livraison
       if (pdfDate && deliveryDate && pdfDate !== deliveryDate) {
         const pdfDateLabel = new Date(pdfDate + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-        const confirmed = window.confirm(`⚠️ Attention\n\nLes feuilles injectées semblent être celles du ${pdfDateLabel}.\n\nVeuillez modifier la date de livraison ou le document importé.\n\nVoulez-vous continuer quand même ?`)
-        if (!confirmed) {
-          setLoading(false)
-          setProgress('')
-          return
-        }
+        toast.error(`Les feuilles injectées semblent être celles du ${pdfDateLabel}. Veuillez modifier la date de livraison ou le document importé.`, { duration: 8000 })
+        setLoading(false)
+        setProgress('')
+        return
       }
 
       if (parsedTours.length === 0) throw new Error('Aucune tournée détectée dans ce PDF.')
