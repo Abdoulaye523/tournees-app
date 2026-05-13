@@ -76,6 +76,23 @@ function parsePDFText(text) {
   let inChargement = false
   let skip = false
 
+  // Détecter la date du PDF (format: "Mercredi 6 Mai" ou similaire)
+  let pdfDateDetected = null
+  const months = { janvier:1, février:2, mars:3, avril:4, mai:5, juin:6, juillet:7, août:8, septembre:9, octobre:10, novembre:11, décembre:12 }
+  for (const line of lines.slice(0, 30)) {
+    const m = line.match(/(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+(\d{1,2})\s+(\w+)/i)
+    if (m) {
+      const day = parseInt(m[1])
+      const monthStr = m[2].toLowerCase()
+      const month = months[monthStr]
+      if (month) {
+        const year = new Date().getFullYear()
+        pdfDateDetected = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+        break
+      }
+    }
+  }
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
 
@@ -193,7 +210,7 @@ function parsePDFText(text) {
     }
   }
 
-  return Object.values(tours).filter(t => t.parcels.length > 0 || t.excluded.length > 0)
+  return { tours: Object.values(tours).filter(t => t.parcels.length > 0 || t.excluded.length > 0), pdfDate: pdfDateDetected }
 }
 
 // ─── MATCHING avec reference_tours ───────────────────────────────────────────
@@ -274,7 +291,18 @@ export default function UploadPDF() {
       const text = await extractTextFromPDF(file)
 
       setProgress('Analyse des tournées...')
-      const parsedTours = parsePDFText(text)
+      const { tours: parsedTours, pdfDate } = parsePDFText(text)
+
+      // Vérifier si la date du PDF correspond à la date de livraison
+      if (pdfDate && deliveryDate && pdfDate !== deliveryDate) {
+        const pdfDateLabel = new Date(pdfDate + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+        const confirmed = window.confirm(`⚠️ Attention\n\nLes feuilles injectées semblent être celles du ${pdfDateLabel}.\n\nVeuillez modifier la date de livraison ou le document importé.\n\nVoulez-vous continuer quand même ?`)
+        if (!confirmed) {
+          setLoading(false)
+          setProgress('')
+          return
+        }
+      }
 
       if (parsedTours.length === 0) throw new Error('Aucune tournée détectée dans ce PDF.')
 
