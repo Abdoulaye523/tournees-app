@@ -66,25 +66,26 @@ function parsePDFText(text) {
   let inChargement = false
   let skip = false
 
-  // Détecter la date du PDF
-  let pdfDateDetected = null
+  // Détecter les dates au fil du parsing (une par tournée)
   const months = { janvier:1, février:2, mars:3, avril:4, mai:5, juin:6, juillet:7, août:8, septembre:9, octobre:10, novembre:11, décembre:12 }
-  for (const line of lines.slice(0, 30)) {
-    const m = line.match(/(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+(\d{1,2})\s+(\w+)/i)
-    if (m) {
-      const day = parseInt(m[1])
-      const monthStr = m[2].toLowerCase()
-      const month = months[monthStr]
-      if (month) {
-        const year = new Date().getFullYear()
-        pdfDateDetected = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
-        break
-      }
-    }
-  }
+  let currentDate = null // date courante détectée dans la page
+  let pdfDateDetected = null // première date trouvée (pour fallback)
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
+
+    // Détecter la date de la page courante
+    const dateMatch = line.match(/(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+(\d{1,2})\s+(\w+)/i)
+    if (dateMatch) {
+      const day = parseInt(dateMatch[1])
+      const monthStr = dateMatch[2].toLowerCase()
+      const month = months[monthStr]
+      if (month) {
+        const year = new Date().getFullYear()
+        currentDate = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+        if (!pdfDateDetected) pdfDateDetected = currentDate
+      }
+    }
 
     const fullTourMatch = line.match(/TOURNEE\s+TA830(?:CAMION|camion)(m\s+)?(.+)/i)
     if (fullTourMatch) {
@@ -93,7 +94,7 @@ function parsePDFText(text) {
       if (seenTours.has(name)) { skip = true; currentTourName = null; inChargement = false }
       else {
         seenTours.add(name); currentTourName = name; skip = false; inChargement = false
-        if (!tours[name]) tours[name] = { name, parcels: [], excluded: [], typeLivraison: null, heurePremiereLivraison: null }
+        if (!tours[name]) tours[name] = { name, parcels: [], excluded: [], typeLivraison: null, heurePremiereLivraison: null, tourDate: currentDate }
       }
       continue
     }
@@ -111,7 +112,7 @@ function parsePDFText(text) {
       if (seenTours.has(name)) { skip = true; currentTourName = null; inChargement = false }
       else {
         seenTours.add(name); currentTourName = name; skip = false; inChargement = false
-        if (!tours[name]) tours[name] = { name, parcels: [], excluded: [], typeLivraison: null, heurePremiereLivraison: null }
+        if (!tours[name]) tours[name] = { name, parcels: [], excluded: [], typeLivraison: null, heurePremiereLivraison: null, tourDate: currentDate }
       }
       continue
     }
@@ -305,14 +306,29 @@ export default function UploadPDF() {
   async function insertTours(tours, dateData, uploadRecord, finalDate) {
     let totalTours = 0
     let totalParcels = 0
-    const dateLabel = new Date(finalDate + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+
+    // Cache des delivery_dates par date
+    const dateCache = { [finalDate]: dateData }
 
     for (const tour of tours) {
+      // Utiliser la date de la tournée si disponible, sinon la date globale
+      const tourDateStr = tour.tourDate || finalDate
+      let tourDateData = dateCache[tourDateStr]
+      if (!tourDateData) {
+        const { data: dd } = await supabase
+          .from('delivery_dates')
+          .upsert({ delivery_date: tourDateStr }, { onConflict: 'delivery_date' })
+          .select().single()
+        tourDateData = dd
+        dateCache[tourDateStr] = dd
+      }
+
+      const dateLabel = new Date(tourDateStr + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
       const tourName = `${tour.finalName} - ${dateLabel}`
       const { data: tourData, error: tourError } = await supabase
         .from('tours')
         .upsert({
-          delivery_date_id: dateData.id,
+          delivery_date_id: tourDateData.id,
           name: tourName,
           total_parcels: tour.parcels.length,
           excluded_parcels: tour.excluded.length,
