@@ -256,7 +256,7 @@ export default function UploadPDF() {
   }
 
   async function handleUpload() {
-    if (!file || !deliveryDate) return toast.error('Sélectionnez un fichier et une date.')
+    if (!file) return toast.error('Sélectionnez un fichier PDF.')
     setLoading(true)
     setResult(null)
     setUnmatchedTours([])
@@ -273,7 +273,7 @@ export default function UploadPDF() {
       setProgress('Création de la date de livraison...')
       const { data: dateData, error: dateError } = await supabase
         .from('delivery_dates')
-        .upsert({ delivery_date: deliveryDate }, { onConflict: 'delivery_date' })
+        .upsert({ delivery_date: finalDate }, { onConflict: 'delivery_date' })
         .select().single()
       if (dateError) throw new Error('Erreur date : ' + dateError.message)
 
@@ -293,14 +293,16 @@ export default function UploadPDF() {
       setProgress('Analyse des tournées...')
       const { tours: parsedTours, pdfDate } = parsePDFText(text)
 
-      // Vérifier si la date du PDF correspond à la date de livraison
-      if (pdfDate && deliveryDate && pdfDate !== deliveryDate) {
-        const pdfDateLabel = new Date(pdfDate + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-        toast.error(`Les feuilles injectées semblent être celles du ${pdfDateLabel}. Veuillez modifier la date de livraison ou le document importé.`, { duration: 8000 })
+      // Auto-set delivery date from PDF
+      if (pdfDate) {
+        setDeliveryDate(pdfDate)
+      } else if (!deliveryDate) {
+        toast.error('Impossible de détecter la date de livraison dans le PDF.')
         setLoading(false)
         setProgress('')
         return
       }
+      const finalDate = pdfDate || deliveryDate
 
       if (parsedTours.length === 0) throw new Error('Aucune tournée détectée dans ce PDF.')
 
@@ -385,7 +387,7 @@ export default function UploadPDF() {
     let totalParcels = 0
 
     for (const tour of tours) {
-      const dateLabel = new Date(deliveryDate + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      const dateLabel = new Date((deliveryDate || finalDate) + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
       const tourName = tour.referenceId ? `${tour.finalName} - ${dateLabel}` : `${tour.name || tour.finalName} - ${dateLabel}`
 
       const { data: tourData, error: tourError } = await supabase
@@ -462,18 +464,7 @@ export default function UploadPDF() {
           </div>
           <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
-            <div className="form-group">
-              <label className="form-label">Date de livraison</label>
-              <input
-                type="date"
-                className="form-input"
-                value={deliveryDate || tomorrowStr}
-                onChange={e => setDeliveryDate(e.target.value)}
-              />
-              <span style={{ fontSize: '12px', color: 'var(--gray-400)' }}>
-                Exemple : si aujourd'hui on contrôle les tournées du 16 avril, sélectionnez le 16 avril.
-              </span>
-            </div>
+
 
             <div
               className={`upload-zone${dragover ? ' dragover' : ''}`}
