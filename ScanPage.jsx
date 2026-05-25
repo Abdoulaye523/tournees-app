@@ -178,23 +178,30 @@ export default function ScanPage() {
         return
       }
 
-      const { error: insertError } = await supabase
+      // INSERT d'abord - si ça échoue on affiche une erreur
+      const { data: insertedScan, error: insertError } = await supabase
         .from('scan_events')
         .insert(insertData)
+        .select()
+        .single()
 
       if (insertError) {
         console.error('INSERT ERROR:', insertError)
+        if (popupTimer.current) clearTimeout(popupTimer.current)
+        setPopup({ type: 'unknown', barcode: bc, tourName: null, error: true })
+        popupTimer.current = setTimeout(() => setPopup(null), POPUP_DURATION)
+        toast.error('Erreur enregistrement scan - réessayez')
         return
       }
 
-      // Mettre à jour l'état local
+      // Mettre à jour l'état local seulement après confirmation de l'INSERT
       if (resultType === 'ok') {
         setScannedBarcodes(prev => new Set([...prev, bc]))
-        setScannedList(prev => [{ barcode: bc, scanned_at: new Date().toISOString() }, ...prev])
+        setScannedList(prev => [{ barcode: bc, scanned_at: insertedScan.scanned_at || new Date().toISOString() }, ...prev])
       } else if (resultType === 'wrong_tour') {
         setWrongTourList(prev => [{
           barcode: bc,
-          scanned_at: new Date().toISOString(),
+          scanned_at: insertedScan.scanned_at || new Date().toISOString(),
           real_tour: realTourName,
         }, ...prev])
       }
