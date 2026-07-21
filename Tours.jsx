@@ -83,6 +83,7 @@ export default function Tours() {
       try {
         const { data: { session } } = await supabase.auth.getSession()
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+        console.log('Envoi mail avec date:', date)
         const emailRes = await fetch(`${supabaseUrl}/functions/v1/send-daily-report`, {
           method: 'POST',
           headers: {
