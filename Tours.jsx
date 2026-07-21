@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from './supabase'
-import { Truck, Archive, RotateCcw, ScanLine, ChevronDown, ChevronUp, AlertTriangle, Package } from 'lucide-react'
+import { Truck, Archive, RotateCcw, ScanLine, ChevronDown, ChevronUp, AlertTriangle, Package, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function Tours() {
@@ -13,6 +13,8 @@ export default function Tours() {
   const [expanded, setExpanded] = useState(null)
   const [detail, setDetail] = useState({})
   const [detailLoading, setDetailLoading] = useState(false)
+  const [deletingDate, setDeletingDate] = useState(null)
+  const [validatingDate, setValidatingDate] = useState(null)
 
   useEffect(() => { fetchTours() }, [showArchived])
 
@@ -28,38 +30,101 @@ export default function Tours() {
     setLoading(false)
   }
 
+  async function deleteImport(date, dateTours) {
+    if (!confirm(`Supprimer tout l'import du ${new Date(date + 'T12:00:00').toLocaleDateString('fr-FR')} ? (${dateTours.length} tournées)`)) return
+    setDeletingDate(date)
+    try {
+      const tourIds = dateTours.map(t => t.tour_id)
+      await supabase.from('scan_events').delete().in('tour_id', tourIds)
+      await supabase.from('parcels').delete().in('tour_id', tourIds)
+      await supabase.from('tours').delete().in('id', tourIds)
+      const { data: dateData } = await supabase
+        .from('delivery_dates').select('id').eq('delivery_date', date).single()
+      if (dateData) await supabase.from('delivery_dates').delete().eq('id', dateData.id)
+      toast.success('Import supprimé avec succès')
+      fetchTours()
+    } catch (err) {
+      toast.error('Erreur lors de la suppression : ' + err.message)
+    } finally {
+      setDeletingDate(null)
+    }
+  }
+
+  async function validateControl(date, dateTours) {
+    if (!confirm(`Valider le contrôle du ${new Date(date + 'T12:00:00').toLocaleDateString('fr-FR')} ?\nLes colis non scannés seront marqués "Non réceptionné" et les tournées seront clôturées.`)) return
+    setValidatingDate(date)
+    try {
+      const tourIds = dateTours.map(t => t.tour_id)
+
+      for (const tourId of tourIds) {
+        const { data: scannedEvents } = await supabase
+          .from('scan_events').select('barcode_scanned')
+          .eq('tour_id', tourId).in('result_type', ['ok', 'already_scanned'])
+        const scannedBarcodes = new Set((scannedEvents || []).map(e => e.barcode_scanned))
+
+        const { data: parcels } = await supabase
+          .from('parcels').select('id, barcode').eq('tour_id', tourId).eq('excluded', false)
+
+        const unscannedIds = (parcels || []).filter(p => !scannedBarcodes.has(p.barcode)).map(p => p.id)
+        if (unscannedIds.length > 0) {
+          await supabase.from('parcels').update({ reception_status: 'Non réceptionné' }).in('id', unscannedIds)
+        }
+        const scannedIds = (parcels || []).filter(p => scannedBarcodes.has(p.barcode)).map(p => p.id)
+        if (scannedIds.length > 0) {
+          await supabase.from('parcels').update({ reception_status: 'Réceptionné' }).in('id', scannedIds)
+        }
+      }
+
+      await supabase.from('tours').update({ status: 'completed', archived: true }).in('id', tourIds)
+
+      toast.success('Contrôle validé avec succès !')
+
+      // Envoyer le rapport par email
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+        const emailRes = await fetch(`${supabaseUrl}/functions/v1/send-daily-report`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ date }),
+        })
+        if (emailRes.ok) toast.success('Rapport envoyé par email !')
+        else toast.error('Contrôle validé mais erreur envoi email.')
+      } catch (emailErr) {
+        console.error('Erreur envoi email:', emailErr)
+      }
+
+      fetchTours()
+    } catch (err) {
+      toast.error('Erreur lors de la validation : ' + err.message)
+    } finally {
+      setValidatingDate(null)
+    }
+  }
+
   async function toggleDetail(tour) {
     if (expanded === tour.tour_id) { setExpanded(null); return }
     setExpanded(tour.tour_id)
     if (detail[tour.tour_id]) return
-
     setDetailLoading(true)
     try {
       const { data: parcels } = await supabase
-        .from('parcels')
-        .select('barcode, excluded, exclusion_reason')
-        .eq('tour_id', tour.tour_id)
-        .order('barcode')
-
+        .from('parcels').select('barcode, excluded, exclusion_reason').eq('tour_id', tour.tour_id).order('barcode')
       const { data: scans } = await supabase
-        .from('scan_events')
-        .select('barcode_scanned, result_type, scanned_at, users(full_name)')
-        .eq('tour_id', tour.tour_id)
-        .order('scanned_at', { ascending: false })
+        .from('scan_events').select('barcode_scanned, result_type, scanned_at, users(full_name)')
+        .eq('tour_id', tour.tour_id).order('scanned_at', { ascending: false })
 
       const activeParcels = (parcels || []).filter(p => !p.excluded)
       const scannedBarcodes = new Set(
-        (scans || []).filter(s => s.result_type === 'ok' || s.result_type === 'already_scanned')
-          .map(s => s.barcode_scanned)
+        (scans || []).filter(s => s.result_type === 'ok' || s.result_type === 'already_scanned').map(s => s.barcode_scanned)
       )
       const missingParcels = activeParcels.filter(p => !scannedBarcodes.has(p.barcode))
       const anomalies = (scans || []).filter(s => s.result_type === 'wrong_tour')
       const excluded = (parcels || []).filter(p => p.excluded)
-
-      setDetail(d => ({
-        ...d,
-        [tour.tour_id]: { activeParcels, scannedBarcodes, missingParcels, anomalies, excluded }
-      }))
+      setDetail(d => ({ ...d, [tour.tour_id]: { activeParcels, scannedBarcodes, missingParcels, anomalies, excluded } }))
     } finally {
       setDetailLoading(false)
     }
@@ -67,10 +132,7 @@ export default function Tours() {
 
   async function toggleArchive(e, tour) {
     e.stopPropagation()
-    const { error } = await supabase
-      .from('tours')
-      .update({ archived: !tour.archived })
-      .eq('id', tour.tour_id)
+    const { error } = await supabase.from('tours').update({ archived: !tour.archived }).eq('id', tour.tour_id)
     if (error) return toast.error('Erreur lors de l\'archivage')
     toast.success(tour.archived ? 'Tournée désarchivée' : 'Tournée archivée')
     fetchTours()
@@ -86,10 +148,7 @@ export default function Tours() {
     return <span className={`badge ${s.cls}`}>{s.label}</span>
   }
 
-  const filtered = tours.filter(t =>
-    t.tour_name?.toLowerCase().includes(filter.toLowerCase())
-  )
-
+  const filtered = tours.filter(t => t.tour_name?.toLowerCase().includes(filter.toLowerCase()))
   const byDate = filtered.reduce((acc, t) => {
     const d = t.delivery_date
     if (!acc[d]) acc[d] = []
@@ -114,13 +173,8 @@ export default function Tours() {
 
       <div className="page-body">
         <div style={{ marginBottom: '16px' }}>
-          <input
-            className="form-input"
-            placeholder="Rechercher une tournée..."
-            value={filter}
-            onChange={e => setFilter(e.target.value)}
-            style={{ maxWidth: '320px', width: '100%' }}
-          />
+          <input className="form-input" placeholder="Rechercher une tournée..." value={filter}
+            onChange={e => setFilter(e.target.value)} style={{ maxWidth: '320px', width: '100%' }} />
         </div>
 
         {loading ? (
@@ -136,106 +190,75 @@ export default function Tours() {
         ) : (
           Object.entries(byDate).sort(([a], [b]) => b.localeCompare(a)).map(([date, dateTours]) => (
             <div key={date} style={{ marginBottom: '24px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', flexWrap: 'wrap' }}>
                 <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, color: 'var(--gray-700)', fontSize: '15px' }}>
                   {new Date(date + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
                 </span>
                 <span className="badge badge-gray">{dateTours.length}</span>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                  <button
+                    className="btn btn-sm"
+                    style={{ background: '#f0fdf4', border: '1px solid #a7f3d0', color: '#059669', opacity: validatingDate === date ? 0.5 : 1 }}
+                    disabled={validatingDate === date}
+                    onClick={() => validateControl(date, dateTours)}
+                  >
+                    {validatingDate === date ? <div className="spinner" style={{ width: 14, height: 14 }} /> : <span>✓</span>}
+                    <span style={{ marginLeft: 4, fontSize: 12 }}>Valider le contrôle</span>
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ color: 'var(--red)', opacity: deletingDate === date ? 0.5 : 1 }}
+                    disabled={deletingDate === date}
+                    onClick={() => deleteImport(date, dateTours)}
+                  >
+                    {deletingDate === date ? <div className="spinner" style={{ width: 14, height: 14 }} /> : <Trash2 size={14} />}
+                    <span style={{ marginLeft: 4, fontSize: 12 }}>Supprimer l'import</span>
+                  </button>
+                </div>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {dateTours.map(t => (
                   <div key={t.tour_id} className="card" style={{ opacity: t.archived ? 0.6 : 1, overflow: 'hidden' }}>
-
-                    {/* Ligne principale */}
-                    <div
-                      style={{ padding: '14px 16px', cursor: 'pointer' }}
-                      onClick={() => toggleDetail(t)}
-                    >
-                      {/* Ligne 1 : Nom + statut + chevron */}
+                    <div style={{ padding: '14px 16px', cursor: 'pointer' }} onClick={() => toggleDetail(t)}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <span style={{
-                            fontFamily: 'var(--font-display)', fontWeight: 800,
-                            fontSize: 'clamp(14px, 3.5vw, 17px)',
-                            color: 'var(--gray-800)',
-                            wordBreak: 'break-word',
-                          }}>
+                          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 'clamp(14px, 3.5vw, 17px)', color: 'var(--gray-800)', wordBreak: 'break-word' }}>
                             {t.tour_name}
                           </span>
                           {t.archived && <span className="badge badge-gray" style={{ marginLeft: 6 }}>Archivée</span>}
                         </div>
-                        {expanded === t.tour_id
-                          ? <ChevronUp size={16} color="var(--gray-400)" style={{ flexShrink: 0 }} />
-                          : <ChevronDown size={16} color="var(--gray-400)" style={{ flexShrink: 0 }} />
-                        }
+                        {expanded === t.tour_id ? <ChevronUp size={16} color="var(--gray-400)" style={{ flexShrink: 0 }} /> : <ChevronDown size={16} color="var(--gray-400)" style={{ flexShrink: 0 }} />}
                       </div>
 
-                      {/* Ligne 2 : Stats + actions */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        {/* Statut */}
                         {statusBadge(t.status)}
-
-                        {/* Scannés */}
                         <span style={{ fontSize: 13, color: 'var(--gray-600)', fontWeight: 500 }}>
                           <span style={{ fontWeight: 700, color: 'var(--gray-800)' }}>{t.scanned_count}</span>
                           <span style={{ color: 'var(--gray-300)' }}>/{t.total_parcels}</span>
                           <span style={{ color: 'var(--gray-400)', fontWeight: 400, marginLeft: 2 }}>scannés</span>
                         </span>
-
-                        {/* Manquants */}
-                        {t.missing_count > 0 && (
-                          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--red)' }}>
-                            {t.missing_count} manquants
-                          </span>
-                        )}
-
-                        {/* Anomalies */}
-                        {(t.wrong_tour_count + t.unknown_count) > 0 && (
-                          <span className="badge badge-orange">
-                            {t.wrong_tour_count + t.unknown_count} anomalies
-                          </span>
-                        )}
-
-                        {/* Reprises */}
-                        {t.excluded_parcels > 0 && (
-                          <span className="badge badge-gray">
-                            {t.excluded_parcels} reprise{t.excluded_parcels > 1 ? 's' : ''}
-                          </span>
-                        )}
-
-                        {/* Actions — à droite */}
+                        {t.missing_count > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--red)' }}>{t.missing_count} manquants</span>}
+                        {(t.wrong_tour_count + t.unknown_count) > 0 && <span className="badge badge-orange">{t.wrong_tour_count + t.unknown_count} anomalies</span>}
+                        {t.excluded_parcels > 0 && <span className="badge badge-gray">{t.excluded_parcels} reprise{t.excluded_parcels > 1 ? 's' : ''}</span>}
                         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-                          <button
-                            className="btn btn-primary btn-sm"
-                            onClick={() => navigate(`/admin/scan/${t.tour_id}`)}
-                          >
+                          <button className="btn btn-primary btn-sm" onClick={() => navigate(`/admin/scan/${t.tour_id}`)}>
                             <ScanLine size={13} />
-                            <span style={{ display: 'none' }}>Scanner</span>
                             <span className="btn-label-desktop">Scanner</span>
                           </button>
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={e => toggleArchive(e, t)}
-                            title={t.archived ? 'Désarchiver' : 'Archiver'}
-                          >
+                          <button className="btn btn-ghost btn-sm" onClick={e => toggleArchive(e, t)} title={t.archived ? 'Désarchiver' : 'Archiver'}>
                             {t.archived ? <RotateCcw size={14} /> : <Archive size={14} />}
                           </button>
                         </div>
                       </div>
                     </div>
 
-                    {/* Panneau de détail */}
                     {expanded === t.tour_id && (
                       <div style={{ borderTop: '1px solid var(--gray-100)' }}>
                         {detailLoading && !detail[t.tour_id] ? (
-                          <div className="loading-center" style={{ padding: '24px' }}>
-                            <div className="spinner dark" />
-                          </div>
+                          <div className="loading-center" style={{ padding: '24px' }}><div className="spinner dark" /></div>
                         ) : detail[t.tour_id] ? (
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 0 }}>
-
-                            {/* Tous les colis */}
                             <div style={{ borderRight: '1px solid var(--gray-100)', borderBottom: '1px solid var(--gray-100)' }}>
                               <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--gray-100)', background: 'var(--gray-50)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -249,9 +272,7 @@ export default function Tours() {
                                   const isScanned = detail[t.tour_id].scannedBarcodes.has(p.barcode)
                                   return (
                                     <div key={p.barcode} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 14px', borderBottom: '1px solid var(--gray-100)', background: isScanned ? '#f0fdf4' : undefined }}>
-                                      <span style={{ color: isScanned ? '#059669' : 'var(--red)', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
-                                        {isScanned ? '✓' : '✗'}
-                                      </span>
+                                      <span style={{ color: isScanned ? '#059669' : 'var(--red)', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{isScanned ? '✓' : '✗'}</span>
                                       <code style={{ fontSize: 11, color: 'var(--gray-600)' }}>{p.barcode}</code>
                                     </div>
                                   )
@@ -259,7 +280,6 @@ export default function Tours() {
                               </div>
                             </div>
 
-                            {/* Manquants */}
                             <div style={{ borderRight: '1px solid var(--gray-100)', borderBottom: '1px solid var(--gray-100)' }}>
                               <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--gray-100)', background: detail[t.tour_id].missingParcels.length > 0 ? 'var(--red-light)' : 'var(--green-light)', display: 'flex', justifyContent: 'space-between' }}>
                                 <span style={{ fontSize: 11, fontWeight: 600, color: detail[t.tour_id].missingParcels.length > 0 ? '#991b1b' : '#065f46' }}>Manquants</span>
@@ -278,7 +298,6 @@ export default function Tours() {
                               </div>
                             </div>
 
-                            {/* Anomalies + Reprises */}
                             <div style={{ borderBottom: '1px solid var(--gray-100)' }}>
                               <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--gray-100)', background: detail[t.tour_id].anomalies.length > 0 ? '#fff7ed' : 'var(--gray-50)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -300,7 +319,6 @@ export default function Tours() {
                                   ))
                                 }
                               </div>
-
                               {detail[t.tour_id].excluded.length > 0 && (
                                 <>
                                   <div style={{ padding: '8px 14px', borderTop: '1px solid var(--gray-100)', borderBottom: '1px solid var(--gray-100)', background: 'var(--gray-50)', display: 'flex', justifyContent: 'space-between' }}>
@@ -329,12 +347,7 @@ export default function Tours() {
         )}
       </div>
 
-      <style>{`
-        .btn-label-desktop { display: inline; margin-left: 4px; }
-        @media (max-width: 480px) {
-          .btn-label-desktop { display: none; }
-        }
-      `}</style>
+      <style>{`.btn-label-desktop { display: inline; margin-left: 4px; } @media (max-width: 480px) { .btn-label-desktop { display: none; } }`}</style>
     </>
   )
 }
