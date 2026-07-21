@@ -133,7 +133,7 @@ export default function Tours() {
             'Authorization': `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({}),
+          body: JSON.stringify({ date }),
         })
         if (emailRes.ok) toast.success('Rapport envoyé par email !')
         else toast.error('Contrôle validé mais erreur envoi email.')
