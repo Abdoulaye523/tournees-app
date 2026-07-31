@@ -58,6 +58,12 @@ function normalize(str) {
   return str.replace(/\s+/g, '').toLowerCase()
 }
 
+// 🔧 FONCTION DE NORMALISATION DES ACCENTS
+function removeAccents(str) {
+  if (!str) return ''
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+}
+
 function parsePDFText(text) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
   const tours = {}
@@ -68,6 +74,13 @@ function parsePDFText(text) {
 
   // Détecter les dates au fil du parsing (une par tournée)
   const months = { janvier:1, février:2, mars:3, avril:4, mai:5, juin:6, juillet:7, août:8, septembre:9, octobre:10, novembre:11, décembre:12 }
+  
+  // 🔧 CRÉER UNE VERSION NORMALISÉE (sans accents) DU DICTIONNAIRE
+  const monthsNormalized = {}
+  Object.entries(months).forEach(([key, val]) => {
+    monthsNormalized[removeAccents(key)] = val
+  })
+  
   let currentDate = null // date courante détectée dans la page
   let pdfDateDetected = null // première date trouvée (pour fallback)
 
@@ -75,11 +88,12 @@ function parsePDFText(text) {
     const line = lines[i]
 
     // Détecter la date de la page courante
-    const dateMatch = line.match(/(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+(\d{1,2})\s+(\w+)/i)
+    // 🔧 Utiliser [^\s]+ au lieu de \w+ pour capturer les accents (Août, février, etc.)
+    const dateMatch = line.match(/(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+(\d{1,2})\s+([^\s]+)/i)
     if (dateMatch) {
       const day = parseInt(dateMatch[1])
-      const monthStr = dateMatch[2].toLowerCase()
-      const month = months[monthStr]
+      const monthStr = removeAccents(dateMatch[2].toLowerCase()) // 🔧 Normaliser avant lookup
+      const month = monthsNormalized[monthStr]
       if (month) {
         const year = new Date().getFullYear()
         currentDate = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
