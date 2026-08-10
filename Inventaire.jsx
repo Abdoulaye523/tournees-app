@@ -107,8 +107,15 @@ export default function Inventaire() {
 
     const scannedOk = new Set((okScans || []).map(s => `${s.barcode_scanned}__${s.zone_selectionnee}`))
 
-    // Manquants = items non scannés OK dans leur zone
-    const missing = (allItems || []).filter(item => !scannedOk.has(`${item.barcode}__${item.zone}`))
+    // Barcodes scannés en wrong_zone (mal positionnés)
+    const wrongZoneBarcodes = new Set((scansData || []).filter(s => s.result_type === 'wrong_zone').map(s => s.barcode_scanned))
+
+    // Manquants = items non scannés OK dans leur zone ET pas mal positionnés (exclure header 'Article')
+    const missing = (allItems || []).filter(item => 
+      !scannedOk.has(`${item.barcode}__${item.zone}`) && 
+      !wrongZoneBarcodes.has(item.barcode) &&
+      item.barcode !== 'Article'
+    ).sort((a, b) => (a.zone || '').localeCompare(b.zone || ''))
 
     setRapportData({ wrongZone, unknown, missing })
     setLoadingRapport(false)
