@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from './AuthContext'
 import {
-  LayoutDashboard, Truck, Upload, Users, Search, FileSearch, RotateCcw, LogOut, Menu, X, BookMarked, ClipboardList, Map, Activity, ShieldAlert, MailIcon, PackageX
+  LayoutDashboard, Truck, Upload, Users, Search, FileSearch, RotateCcw, LogOut, Menu, X, BookMarked, ClipboardList, Map, Activity, ShieldAlert, MailIcon, PackageX, ClipboardCheck
 } from 'lucide-react'
 
 const navPilotage = [
@@ -16,6 +16,7 @@ const navPilotage = [
 ]
 
 const navControle = [
+  { to: '/admin/inventaire', label: 'Inventaire', icon: <ClipboardCheck size={16} /> },
   { to: '/admin/tours', label: 'Tournées', icon: <Truck size={16} /> },
   { to: '/admin/search-tours', label: 'Recherche tournées', icon: <FileSearch size={16} /> },
   { to: '/admin/search-parcel', label: 'Recherche colis', icon: <Search size={16} /> },
