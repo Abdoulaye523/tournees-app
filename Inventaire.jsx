@@ -32,7 +32,8 @@ export default function Inventaire() {
   const [sessions, setSessions] = useState([])
   const [file, setFile] = useState(null)
   const [dragover, setDragover] = useState(false)
-  const [rapportData, setRapportData] = useState({ wrongZone: [], unknown: [] })
+  const [rapportData, setRapportData] = useState({ wrongZone: [], unknown: [], missing: [] })
+  const [missingCorrected, setMissingCorrected] = useState(new Set())
   const [loadingRapport, setLoadingRapport] = useState(false)
 
   const inputRef = useRef()
@@ -79,16 +80,37 @@ export default function Inventaire() {
 
   async function fetchRapport(sessionId) {
     setLoadingRapport(true)
-    const { data } = await supabase
+
+    // Scans anomalies
+    const { data: scansData } = await supabase
       .from('inventory_scans')
       .select('id, barcode_scanned, result_type, real_zone, zone_selectionnee, corrected, scanned_at')
       .eq('session_id', sessionId)
       .in('result_type', ['wrong_zone', 'unknown'])
       .order('scanned_at', { ascending: false })
-    
-    const wrongZone = (data || []).filter(s => s.result_type === 'wrong_zone')
-    const unknown = (data || []).filter(s => s.result_type === 'unknown')
-    setRapportData({ wrongZone, unknown })
+
+    const wrongZone = (scansData || []).filter(s => s.result_type === 'wrong_zone')
+    const unknown = (scansData || []).filter(s => s.result_type === 'unknown')
+
+    // Tous les items du fichier
+    const { data: allItems } = await supabase
+      .from('inventory_items')
+      .select('barcode, zone')
+      .eq('session_id', sessionId)
+
+    // Tous les barcodes scannés OK
+    const { data: okScans } = await supabase
+      .from('inventory_scans')
+      .select('barcode_scanned, zone_selectionnee')
+      .eq('session_id', sessionId)
+      .eq('result_type', 'ok')
+
+    const scannedOk = new Set((okScans || []).map(s => `${s.barcode_scanned}__${s.zone_selectionnee}`))
+
+    // Manquants = items non scannés OK dans leur zone
+    const missing = (allItems || []).filter(item => !scannedOk.has(`${item.barcode}__${item.zone}`))
+
+    setRapportData({ wrongZone, unknown, missing })
     setLoadingRapport(false)
   }
 
@@ -419,6 +441,35 @@ export default function Inventaire() {
                     onClick={() => markCorrected(s.id, s.corrected)}
                   >
                     {s.corrected ? '✓ Corrigé' : 'Marquer corrigé'}
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* Colis manquants */}
+            <div className="card" style={{ marginBottom: 16, overflow: 'hidden' }}>
+              <div style={{ padding: '10px 16px', background: '#fef2f2', borderBottom: '1px solid var(--gray-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: '#991b1b' }}>
+                  📦 Colis manquants
+                </span>
+                <span className="badge badge-red">{rapportData.missing?.length || 0}</span>
+              </div>
+              {!rapportData.missing?.length ? (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--gray-400)', fontSize: 13 }}>Aucun colis manquant</div>
+              ) : rapportData.missing.map((item, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: '1px solid var(--gray-100)', background: missingCorrected.has(item.barcode) ? '#f0fdf4' : undefined, opacity: missingCorrected.has(item.barcode) ? 0.6 : 1 }}>
+                  <div style={{ flex: 1 }}>
+                    <code style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-800)' }}>{item.barcode}</code>
+                    <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 2 }}>
+                      Zone attendue : <strong>{item.zone}</strong>
+                    </div>
+                  </div>
+                  <button
+                    className="btn btn-sm"
+                    style={{ background: missingCorrected.has(item.barcode) ? '#f0fdf4' : 'var(--white)', border: missingCorrected.has(item.barcode) ? '1px solid #a7f3d0' : '1px solid var(--gray-200)', color: missingCorrected.has(item.barcode) ? '#059669' : 'var(--gray-500)', flexShrink: 0 }}
+                    onClick={() => setMissingCorrected(prev => { const n = new Set(prev); n.has(item.barcode) ? n.delete(item.barcode) : n.add(item.barcode); return n })}
+                  >
+                    {missingCorrected.has(item.barcode) ? '✓ Corrigé' : 'Marquer corrigé'}
                   </button>
                 </div>
               ))}
