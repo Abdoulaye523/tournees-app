@@ -8,8 +8,16 @@ import Tours from './Tours'
 import Users from './Users'
 import SearchParcel from './SearchParcel'
 import SearchTours from './SearchTours'
+import Inventaire from './Inventaire'
 import UploadPDF from './UploadPDF'
 import Reprises from './Reprises'
+import ReferenceTours from './ReferenceTours'
+import PreparationTournees from './PreparationTournees'
+import WarehousePlan from './WarehousePlan'
+import SuiviTournees from './SuiviTournees'
+import AnomaliesReception from './AnomaliesReception'
+import AnomaliesPreparation from './AnomaliesPreparation'
+import EmailRecipients from './EmailRecipients'
 import OperatorHome from './OperatorHome'
 import ScanPage from './ScanPage'
 
@@ -28,7 +36,6 @@ function PrivateRoute({ children, adminOnly = false }) {
 
 export default function App() {
   const { user, profile, loading } = useAuth()
-
   if (loading) return (
     <div className="loading-center" style={{ height: '100vh' }}>
       <div className="spinner dark" />
@@ -47,7 +54,15 @@ export default function App() {
         <Route path="users" element={<Users />} />
         <Route path="search-parcel" element={<SearchParcel />} />
         <Route path="search-tours" element={<SearchTours />} />
+        <Route path="inventaire" element={<Inventaire />} />
         <Route path="reprises" element={<Reprises />} />
+        <Route path="reference-tours" element={<ReferenceTours />} />
+        <Route path="preparation-tournees" element={<PreparationTournees />} />
+        <Route path="warehouse" element={<WarehousePlan />} />
+        <Route path="suivi-tournees" element={<SuiviTournees />} />
+        <Route path="anomalies-reception" element={<AnomaliesReception />} />
+        <Route path="anomalies-preparation" element={<AnomaliesPreparation />} />
+        <Route path="email-recipients" element={<EmailRecipients />} />
         <Route path="scan/:tourId" element={<ScanPage />} />
       </Route>
 
