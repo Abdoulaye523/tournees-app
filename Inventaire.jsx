@@ -16,7 +16,7 @@ const SCAN_RESULTS = {
 
 export default function Inventaire() {
   const { profile } = useAuth()
-  const [step, setStep] = useState('import') // import | zone | scan | results
+  const [step, setStep] = useState('import') // import | zone | scan | rapport
   const [session, setSession] = useState(null)
   const [zones, setZones] = useState([])
   const [selectedZone, setSelectedZone] = useState(null)
@@ -32,6 +32,8 @@ export default function Inventaire() {
   const [sessions, setSessions] = useState([])
   const [file, setFile] = useState(null)
   const [dragover, setDragover] = useState(false)
+  const [rapportData, setRapportData] = useState({ wrongZone: [], unknown: [] })
+  const [loadingRapport, setLoadingRapport] = useState(false)
 
   const inputRef = useRef()
   const scanInputRef = useRef(null)
@@ -73,6 +75,29 @@ export default function Inventaire() {
       .order('created_at', { ascending: false })
       .limit(5)
     setSessions(data || [])
+  }
+
+  async function fetchRapport(sessionId) {
+    setLoadingRapport(true)
+    const { data } = await supabase
+      .from('inventory_scans')
+      .select('id, barcode_scanned, result_type, real_zone, zone_selectionnee, corrected, scanned_at')
+      .eq('session_id', sessionId)
+      .in('result_type', ['wrong_zone', 'unknown'])
+      .order('scanned_at', { ascending: false })
+    
+    const wrongZone = (data || []).filter(s => s.result_type === 'wrong_zone')
+    const unknown = (data || []).filter(s => s.result_type === 'unknown')
+    setRapportData({ wrongZone, unknown })
+    setLoadingRapport(false)
+  }
+
+  async function markCorrected(scanId, corrected) {
+    await supabase.from('inventory_scans').update({ corrected: !corrected }).eq('id', scanId)
+    setRapportData(prev => ({
+      wrongZone: prev.wrongZone.map(s => s.id === scanId ? { ...s, corrected: !corrected } : s),
+      unknown: prev.unknown.map(s => s.id === scanId ? { ...s, corrected: !corrected } : s),
+    }))
   }
 
   function handleDrop(e) {
@@ -327,7 +352,12 @@ export default function Inventaire() {
             <h2 className="page-title">Sélectionner une zone</h2>
             <p className="page-subtitle">{session?.filename} — {zones.length} zones</p>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={() => setStep('import')}>← Retour</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setStep('import')}>← Retour</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => { fetchRapport(session.id); setStep('rapport') }}>
+              📋 Compte rendu
+            </button>
+          </div>
         </div>
       </div>
       <div className="page-body">
@@ -344,6 +374,86 @@ export default function Inventaire() {
             </button>
           ))}
         </div>
+      </div>
+    </>
+  )
+
+  // STEP: RAPPORT
+  if (step === 'rapport') return (
+    <>
+      <div className="page-header">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <h2 className="page-title">Compte rendu inventaire</h2>
+            <p className="page-subtitle">{session?.filename}</p>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={() => setStep('zone')}>← Zones</button>
+        </div>
+      </div>
+      <div className="page-body">
+        {loadingRapport ? (
+          <div className="loading-center"><div className="spinner dark" /></div>
+        ) : (
+          <>
+            {/* Colis mal positionnés */}
+            <div className="card" style={{ marginBottom: 16, overflow: 'hidden' }}>
+              <div style={{ padding: '10px 16px', background: '#fff5f5', borderBottom: '1px solid var(--gray-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: '#991b1b' }}>
+                  ⚠️ Colis mal positionnés
+                </span>
+                <span className="badge badge-red">{rapportData.wrongZone.length}</span>
+              </div>
+              {rapportData.wrongZone.length === 0 ? (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--gray-400)', fontSize: 13 }}>Aucun colis mal positionné</div>
+              ) : rapportData.wrongZone.map(s => (
+                <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: '1px solid var(--gray-100)', background: s.corrected ? '#f0fdf4' : undefined, opacity: s.corrected ? 0.6 : 1 }}>
+                  <div style={{ flex: 1 }}>
+                    <code style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-800)' }}>{s.barcode_scanned}</code>
+                    <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 2 }}>
+                      Scanné dans <strong>{s.zone_selectionnee}</strong> → Devrait être en <strong style={{ color: '#dc2626' }}>{s.real_zone}</strong>
+                    </div>
+                  </div>
+                  <button
+                    className="btn btn-sm"
+                    style={{ background: s.corrected ? '#f0fdf4' : 'var(--white)', border: s.corrected ? '1px solid #a7f3d0' : '1px solid var(--gray-200)', color: s.corrected ? '#059669' : 'var(--gray-500)', flexShrink: 0 }}
+                    onClick={() => markCorrected(s.id, s.corrected)}
+                  >
+                    {s.corrected ? '✓ Corrigé' : 'Marquer corrigé'}
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* Colis non présents */}
+            <div className="card" style={{ overflow: 'hidden' }}>
+              <div style={{ padding: '10px 16px', background: '#fffbeb', borderBottom: '1px solid var(--gray-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: '#92400e' }}>
+                  ❓ Colis non présents dans l'inventaire
+                </span>
+                <span className="badge badge-orange">{rapportData.unknown.length}</span>
+              </div>
+              {rapportData.unknown.length === 0 ? (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--gray-400)', fontSize: 13 }}>Aucun colis inconnu</div>
+              ) : rapportData.unknown.map(s => (
+                <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: '1px solid var(--gray-100)', background: s.corrected ? '#f0fdf4' : undefined, opacity: s.corrected ? 0.6 : 1 }}>
+                  <div style={{ flex: 1 }}>
+                    <code style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-800)' }}>{s.barcode_scanned}</code>
+                    <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 2 }}>
+                      Scanné dans zone <strong>{s.zone_selectionnee}</strong> — absent du fichier stock
+                    </div>
+                  </div>
+                  <button
+                    className="btn btn-sm"
+                    style={{ background: s.corrected ? '#f0fdf4' : 'var(--white)', border: s.corrected ? '1px solid #a7f3d0' : '1px solid var(--gray-200)', color: s.corrected ? '#059669' : 'var(--gray-500)', flexShrink: 0 }}
+                    onClick={() => markCorrected(s.id, s.corrected)}
+                  >
+                    {s.corrected ? '✓ Corrigé' : 'Marquer corrigé'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </>
   )
