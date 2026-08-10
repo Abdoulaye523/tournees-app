@@ -8,6 +8,7 @@ import Tours from './Tours'
 import Users from './Users'
 import SearchParcel from './SearchParcel'
 import SearchTours from './SearchTours'
+import Inventaire from './Inventaire'
 import UploadPDF from './UploadPDF'
 import Reprises from './Reprises'
 import ReferenceTours from './ReferenceTours'
@@ -53,6 +54,7 @@ export default function App() {
         <Route path="users" element={<Users />} />
         <Route path="search-parcel" element={<SearchParcel />} />
         <Route path="search-tours" element={<SearchTours />} />
+        <Route path="inventaire" element={<Inventaire />} />
         <Route path="reprises" element={<Reprises />} />
         <Route path="reference-tours" element={<ReferenceTours />} />
         <Route path="preparation-tournees" element={<PreparationTournees />} />
