@@ -2,20 +2,31 @@ import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from './AuthContext'
 import {
-  LayoutDashboard, Truck, Upload, Users, Search, FileSearch, RotateCcw, LogOut, Menu, X
+  LayoutDashboard, Truck, Upload, Users, Search, FileSearch, RotateCcw, LogOut, Menu, X, BookMarked, ClipboardList, Map, Activity, ShieldAlert, MailIcon, PackageX, ClipboardCheck
 } from 'lucide-react'
 
-const navItems = [
+const navPilotage = [
   { to: '/admin', label: 'Dashboard', icon: <LayoutDashboard size={16} />, end: true },
-  { to: '/admin/tours', label: 'Tournées', icon: <Truck size={16} /> },
-  { to: '/admin/upload', label: 'Importer un PDF', icon: <Upload size={16} /> },
+  { to: '/admin/preparation-tournees', label: 'Préparation des tournées', icon: <ClipboardList size={16} /> },
+  { to: '/admin/warehouse', label: 'Plan entrepôt', icon: <Map size={16} /> },
+  { to: '/admin/suivi-tournees', label: 'Suivi des tournées', icon: <Activity size={16} /> },
+  { to: '/admin/anomalies-reception', label: 'Anomalies réception', icon: <ShieldAlert size={16} /> },
+  { to: '/admin/anomalies-preparation', label: 'Anomalies préparation', icon: <PackageX size={16} /> },
+  { to: '/admin/reprises', label: 'Reprises', icon: <RotateCcw size={16} /> },
 ]
 
-const navItems2 = [
-  { to: '/admin/search-parcel', label: 'Recherche colis', icon: <Search size={16} /> },
+const navControle = [
+  { to: '/admin/inventaire', label: 'Inventaire', icon: <ClipboardCheck size={16} /> },
+  { to: '/admin/tours', label: 'Tournées', icon: <Truck size={16} /> },
   { to: '/admin/search-tours', label: 'Recherche tournées', icon: <FileSearch size={16} /> },
+  { to: '/admin/search-parcel', label: 'Recherche colis', icon: <Search size={16} /> },
+]
+
+const navAdmin = [
+  { to: '/admin/upload', label: 'Importer un PDF', icon: <Upload size={16} /> },
+  { to: '/admin/email-recipients', label: 'Destinataires rapport', icon: <MailIcon size={16} /> },
   { to: '/admin/users', label: 'Utilisateurs', icon: <Users size={16} /> },
-  { to: '/admin/reprises', label: 'Reprises', icon: <RotateCcw size={16} /> },
+  { to: '/admin/reference-tours', label: 'Tournées de référence', icon: <BookMarked size={16} /> },
 ]
 
 export default function AdminLayout() {
@@ -36,19 +47,16 @@ export default function AdminLayout() {
 
   return (
     <div className="app-layout">
-
-      {/* Overlay mobile */}
       <div
         className={`sidebar-overlay${sidebarOpen ? ' open' : ''}`}
         onClick={closeSidebar}
       />
 
-      {/* Sidebar */}
       <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>
         <div className="sidebar-logo">
           <div>
-            <h1>CCV<span>.</span></h1>
-            <p>Administration</p>
+            <h1>Superflash</h1>
+            <p>Un outil DONEO pour être meilleur que le Blanc Mesnil</p>
           </div>
           <button className="sidebar-close" onClick={closeSidebar}>
             <X size={18} />
@@ -56,8 +64,8 @@ export default function AdminLayout() {
         </div>
 
         <nav className="sidebar-nav">
-          <span className="sidebar-section-label">Principal</span>
-          {navItems.map(item => (
+          <span className="sidebar-section-label">Pilotage</span>
+          {navPilotage.map(item => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -70,8 +78,21 @@ export default function AdminLayout() {
             </NavLink>
           ))}
 
-          <span className="sidebar-section-label" style={{ marginTop: '8px' }}>Outils</span>
-          {navItems2.map(item => (
+          <span className="sidebar-section-label" style={{ marginTop: '8px' }}>Contrôle</span>
+          {navControle.map(item => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+              onClick={closeSidebar}
+            >
+              {item.icon}
+              {item.label}
+            </NavLink>
+          ))}
+
+          <span className="sidebar-section-label" style={{ marginTop: '8px' }}>Administratif</span>
+          {navAdmin.map(item => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -98,19 +119,16 @@ export default function AdminLayout() {
         </div>
       </aside>
 
-      {/* Main */}
       <main className="main-content">
-        {/* Topbar mobile */}
         <div className="mobile-topbar">
           <button className="btn-menu" onClick={() => setSidebarOpen(true)}>
             <Menu size={22} />
           </button>
-          <span className="mobile-topbar-logo">CCV<span>.</span></span>
+          <span className="mobile-topbar-logo">Superflash</span>
           <div className="user-avatar" style={{ width: 32, height: 32, fontSize: 11 }}>
             {initials}
           </div>
         </div>
-
         <Outlet />
       </main>
     </div>
