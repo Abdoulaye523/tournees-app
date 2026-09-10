@@ -1,11 +1,10 @@
 import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from './AuthContext'
-import { LogOut, Menu, X, Truck, MessageSquarePlus, Search } from 'lucide-react'
+import { LogOut, Menu, X, Truck, Search } from 'lucide-react'
 
 const navOperator = [
   { to: '/operator', label: 'Tournées', icon: <Truck size={16} />, end: true },
-  { to: '/operator/demandes', label: 'Demandes', icon: <MessageSquarePlus size={16} /> },
   { to: '/operator/search-parcel', label: 'Recherche colis', icon: <Search size={16} /> },
 ]
 
