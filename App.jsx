@@ -79,14 +79,14 @@ export default function App() {
       {/* Operator routes */}
       <Route path="/operator" element={<PrivateRoute roles={['operator', 'admin']}><OperatorLayout /></PrivateRoute>}>
         <Route index element={<OperatorHome />} />
-        <Route path="demandes" element={<Demandes />} />
         <Route path="search-parcel" element={<SearchParcel />} />
         <Route path="scan/:tourId" element={<ScanPage />} />
       </Route>
 
-      {/* Partner routes — accès restreint au suivi des tâches */}
+      {/* Partner routes — accès restreint au suivi des tâches et à la recherche colis */}
       <Route path="/partner" element={<PrivateRoute roles={['partner']}><PartnerLayout /></PrivateRoute>}>
         <Route index element={<Demandes />} />
+        <Route path="search-parcel" element={<SearchParcel />} />
       </Route>
 
       <Route path="*" element={<Navigate to={user ? homeForRole(profile?.role) : '/login'} />} />
