@@ -1,21 +1,72 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from './supabase'
-import { Search, Package, AlertTriangle, CheckCircle, XCircle, Clock } from 'lucide-react'
+import { Search, Package, AlertTriangle, CheckCircle, XCircle, Clock, ClipboardList } from 'lucide-react'
+
+const DEMANDE_TYPE_LABELS = {
+  securisation: { label: 'Sécurisation', badge: 'badge-red' },
+  ajout_non_planifie: { label: 'Ajout non planifié', badge: 'badge-orange' },
+  recherche_colis: { label: 'Recherche de colis', badge: 'badge-blue' },
+  autre: { label: 'Autre demande', badge: 'badge-gray' },
+}
 
 export default function SearchParcel() {
-  const [query, setQuery] = useState('')
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const basePath = location.pathname.startsWith('/admin') ? '/admin' : '/operator'
+
+  const [query, setQuery] = useState(searchParams.get('barcode') || '')
   const [results, setResults] = useState([])
+  const [demandesByBarcode, setDemandesByBarcode] = useState({})
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
 
-  async function handleSearch(e) {
+  // Recherche automatique si on arrive depuis une demande (?barcode=...)
+  useEffect(() => {
+    const fromParam = searchParams.get('barcode')
+    if (fromParam) handleSearch(null, fromParam)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function handleSearch(e, forcedQuery) {
     e?.preventDefault()
-    if (!query.trim()) return
+    const q = (forcedQuery ?? query).trim()
+    if (!q) return
+    setQuery(q)
     setLoading(true)
     setSearched(true)
-    const { data } = await supabase.rpc('search_parcel', { p_barcode: query.trim() })
-    setResults(data || [])
+    const { data } = await supabase.rpc('search_parcel', { p_barcode: q })
+    const parcels = data || []
+    setResults(parcels)
+
+    // Récupérer les demandes rattachées aux colis trouvés
+    const barcodes = parcels.map(p => p.barcode)
+    if (barcodes.length > 0) {
+      const { data: demandes } = await supabase
+        .from('demandes')
+        .select('id, type, status, bp')
+        .overlaps('bp', barcodes)
+        .order('created_at', { ascending: false })
+
+      const grouped = {}
+      for (const d of demandes || []) {
+        for (const bp of d.bp || []) {
+          if (!barcodes.includes(bp)) continue
+          if (!grouped[bp]) grouped[bp] = []
+          grouped[bp].push(d)
+        }
+      }
+      setDemandesByBarcode(grouped)
+    } else {
+      setDemandesByBarcode({})
+    }
+
     setLoading(false)
+  }
+
+  function goToDemande(d) {
+    navigate(`${basePath}/demandes?open=${d.id}`)
   }
 
   function resultBadge(type) {
@@ -131,6 +182,30 @@ export default function SearchParcel() {
                         </div>
                         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--red)' }}>
                           {r.wrong_tour_name}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Tâches liées */}
+                    {(demandesByBarcode[r.barcode] || []).length > 0 && (
+                      <div style={{ padding: '12px 16px', borderTop: '1px solid var(--gray-100)', gridColumn: '1 / -1' }}>
+                        <div style={{ fontSize: 11, color: 'var(--gray-400)', marginBottom: 6 }}>Tâches liées</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {demandesByBarcode[r.barcode].map(d => {
+                            const t = DEMANDE_TYPE_LABELS[d.type] || DEMANDE_TYPE_LABELS.autre
+                            return (
+                              <span
+                                key={d.id}
+                                className={`badge ${t.badge}`}
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => goToDemande(d)}
+                                title="Voir la demande"
+                              >
+                                <ClipboardList size={11} /> {t.label}
+                                {d.status === 'resolue' && ' ✓'}
+                              </span>
+                            )
+                          })}
                         </div>
                       </div>
                     )}
