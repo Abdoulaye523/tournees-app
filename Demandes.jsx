@@ -22,15 +22,20 @@ export default function Demandes() {
   const [searchParams, setSearchParams] = useSearchParams()
   const basePath = profile?.role === 'admin' ? '/admin' : profile?.role === 'operator' ? '/operator' : '/partner'
 
-  const canCreate = profile?.role === 'admin' || profile?.role === 'operator'
-  const canValidate = profile?.role === 'admin' || profile?.role === 'operator'
-  const canLinkToSearch = profile?.role === 'admin' || profile?.role === 'operator'
+  const canCreate = true
+  const canValidate = profile?.role === 'admin'
+  const canLinkToSearch = true
 
   const [demandes, setDemandes] = useState([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('ouverte')
+  const [bpSearch, setBpSearch] = useState('')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selected, setSelected] = useState(null)
+
+  const filteredDemandes = bpSearch.trim()
+    ? demandes.filter(d => (d.bp || []).some(bp => bp.toLowerCase().includes(bpSearch.trim().toLowerCase())))
+    : demandes
 
   useEffect(() => { fetchDemandes() }, [statusFilter])
 
@@ -97,7 +102,7 @@ export default function Demandes() {
       </div>
 
       <div className="page-body">
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
           {[
             { value: 'ouverte', label: 'Ouvertes' },
             { value: 'resolue', label: 'Résolues' },
@@ -111,16 +116,35 @@ export default function Demandes() {
               {f.label}
             </button>
           ))}
+
+          <div style={{ position: 'relative', marginLeft: 'auto', width: '260px' }}>
+            <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--gray-300)' }} />
+            <input
+              className="form-input"
+              style={{ paddingLeft: '32px' }}
+              placeholder="Rechercher par numéro de BP"
+              value={bpSearch}
+              onChange={e => setBpSearch(e.target.value)}
+            />
+          </div>
         </div>
+
+        {bpSearch.trim() && (
+          <p style={{ fontSize: '13px', color: 'var(--gray-500)', marginTop: '-12px', marginBottom: '16px' }}>
+            {filteredDemandes.length} tâche{filteredDemandes.length > 1 ? 's' : ''} rattachée{filteredDemandes.length > 1 ? 's' : ''} au BP « {bpSearch.trim()} »
+          </p>
+        )}
 
         <div className="card">
           {loading ? (
             <div className="loading-center"><div className="spinner dark" /></div>
-          ) : demandes.length === 0 ? (
+          ) : filteredDemandes.length === 0 ? (
             <div className="empty-state">
               <ClipboardList size={36} className="empty-state-icon" />
-              <p className="empty-state-title">Aucune demande</p>
-              <p className="empty-state-sub">Les demandes créées apparaîtront ici.</p>
+              <p className="empty-state-title">{bpSearch.trim() ? 'Aucune tâche pour ce BP' : 'Aucune demande'}</p>
+              <p className="empty-state-sub">
+                {bpSearch.trim() ? 'Vérifiez le numéro et réessayez.' : 'Les demandes créées apparaîtront ici.'}
+              </p>
             </div>
           ) : (
             <div className="table-wrapper">
@@ -137,7 +161,7 @@ export default function Demandes() {
                   </tr>
                 </thead>
                 <tbody>
-                  {demandes.map(d => {
+                  {filteredDemandes.map(d => {
                     const t = TYPES[d.type] || TYPES.autre
                     return (
                       <tr key={d.id} style={{ cursor: 'pointer' }} onClick={() => openDetail(d)}>
