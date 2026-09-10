@@ -24,7 +24,7 @@ export default function Demandes() {
 
   const canCreate = true
   const canValidate = profile?.role === 'admin'
-  const canLinkToSearch = true
+  const canLinkToSearch = profile?.role !== 'partner'
 
   const [demandes, setDemandes] = useState([])
   const [loading, setLoading] = useState(true)
