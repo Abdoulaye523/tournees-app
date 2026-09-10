@@ -1,254 +1,221 @@
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from './supabase'
-import { Plus, X } from 'lucide-react'
-import toast from 'react-hot-toast'
+import { Search, Package, AlertTriangle, CheckCircle, XCircle, Clock, ClipboardList } from 'lucide-react'
 
-export default function Users() {
-  const [users, setUsers] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [showModal, setShowModal] = useState(false)
-  const [form, setForm] = useState({ email: '', full_name: '', role: 'operator', password: '' })
-  const [saving, setSaving] = useState(false)
+const DEMANDE_TYPE_LABELS = {
+  securisation: { label: 'Sécurisation', badge: 'badge-red' },
+  ajout_non_planifie: { label: 'Ajout non planifié', badge: 'badge-orange' },
+  recherche_colis: { label: 'Recherche de colis', badge: 'badge-blue' },
+  autre: { label: 'Autre demande', badge: 'badge-gray' },
+}
 
-  useEffect(() => { fetchUsers() }, [])
+export default function SearchParcel() {
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const basePath = location.pathname.startsWith('/admin') ? '/admin' : '/operator'
 
-  async function fetchUsers() {
-    const { data } = await supabase
-      .from('users')
-      .select('*')
-      .order('created_at', { ascending: false })
-    setUsers(data || [])
+  const [query, setQuery] = useState(searchParams.get('barcode') || '')
+  const [results, setResults] = useState([])
+  const [demandesByBarcode, setDemandesByBarcode] = useState({})
+  const [loading, setLoading] = useState(false)
+  const [searched, setSearched] = useState(false)
+
+  // Recherche automatique si on arrive depuis une demande (?barcode=...)
+  useEffect(() => {
+    const fromParam = searchParams.get('barcode')
+    if (fromParam) handleSearch(null, fromParam)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function handleSearch(e, forcedQuery) {
+    e?.preventDefault()
+    const q = (forcedQuery ?? query).trim()
+    if (!q) return
+    setQuery(q)
+    setLoading(true)
+    setSearched(true)
+    const { data } = await supabase.rpc('search_parcel', { p_barcode: q })
+    const parcels = data || []
+    setResults(parcels)
+
+    // Récupérer les demandes rattachées aux colis trouvés
+    const barcodes = parcels.map(p => p.barcode)
+    if (barcodes.length > 0) {
+      const { data: demandes } = await supabase
+        .from('demandes')
+        .select('id, type, status, bp')
+        .overlaps('bp', barcodes)
+        .order('created_at', { ascending: false })
+
+      const grouped = {}
+      for (const d of demandes || []) {
+        for (const bp of d.bp || []) {
+          if (!barcodes.includes(bp)) continue
+          if (!grouped[bp]) grouped[bp] = []
+          grouped[bp].push(d)
+        }
+      }
+      setDemandesByBarcode(grouped)
+    } else {
+      setDemandesByBarcode({})
+    }
+
     setLoading(false)
   }
 
-  async function handleCreate(e) {
-    e.preventDefault()
-    setSaving(true)
-    try {
-      // Créer le compte via signUp (fonctionne côté client)
-      const { data, error } = await supabase.auth.signUp({
-        email: form.email,
-        password: form.password,
-        options: {
-          data: {
-            full_name: form.full_name,
-            role: form.role,
-          },
-          emailRedirectTo: window.location.origin,
-        },
-      })
+  function goToDemande(d) {
+    navigate(`${basePath}/demandes?open=${d.id}`)
+  }
 
-      if (error) throw error
-      if (!data.user) throw new Error('Utilisateur non créé')
-
-      // Mettre à jour le rôle et le nom dans la table users
-      // (le trigger handle_new_user crée la ligne, on la met à jour)
-      await new Promise(r => setTimeout(r, 1000)) // laisser le trigger s'exécuter
-
-      const { error: updateError } = await supabase
-        .from('users')
-        .update({ role: form.role, full_name: form.full_name })
-        .eq('id', data.user.id)
-
-      if (updateError) {
-        // Si le trigger n'a pas encore créé la ligne, on la crée manuellement
-        await supabase.from('users').upsert({
-          id: data.user.id,
-          email: form.email,
-          full_name: form.full_name,
-          role: form.role,
-          active: true,
-        })
-      }
-
-      toast.success('Utilisateur créé avec succès')
-      setShowModal(false)
-      setForm({ email: '', full_name: '', role: 'operator', password: '' })
-      fetchUsers()
-    } catch (err) {
-      toast.error('Erreur : ' + err.message)
-    } finally {
-      setSaving(false)
+  function resultBadge(type) {
+    const map = {
+      ok: { label: 'Conforme', cls: 'badge-green' },
+      already_scanned: { label: 'Déjà scanné', cls: 'badge-blue' },
+      unknown: { label: 'Inconnu', cls: 'badge-orange' },
+      wrong_tour: { label: 'Mauvaise tournée', cls: 'badge-red' },
     }
-  }
-
-  async function toggleActive(user) {
-    const { error } = await supabase
-      .from('users')
-      .update({ active: !user.active })
-      .eq('id', user.id)
-    if (error) return toast.error('Erreur')
-    toast.success(user.active ? 'Utilisateur désactivé' : 'Utilisateur activé')
-    fetchUsers()
-  }
-
-  async function updateRole(userId, role) {
-    const { error } = await supabase.from('users').update({ role }).eq('id', userId)
-    if (error) return toast.error('Erreur')
-    toast.success('Rôle mis à jour')
-    fetchUsers()
+    const s = map[type]
+    if (!s) return null
+    return <span className={`badge ${s.cls}`}>{s.label}</span>
   }
 
   return (
     <>
       <div className="page-header">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="page-title">Utilisateurs</h2>
-            <p className="page-subtitle">{users.length} comptes</p>
-          </div>
-          <button className="btn btn-primary" onClick={() => setShowModal(true)}>
-            <Plus size={15} /> Nouvel utilisateur
-          </button>
-        </div>
+        <h2 className="page-title">Recherche de colis</h2>
+        <p className="page-subtitle">Retrouvez un colis par son numéro de barcode</p>
       </div>
 
       <div className="page-body">
-        <div className="card">
-          {loading ? (
-            <div className="loading-center"><div className="spinner dark" /></div>
+        <form onSubmit={handleSearch} style={{ display: 'flex', gap: '10px', maxWidth: '500px', marginBottom: '24px' }}>
+          <input
+            className="form-input"
+            placeholder="Numéro de colis (partiel ou complet)"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            autoFocus
+          />
+          <button className="btn btn-primary" type="submit" disabled={loading}>
+            <Search size={15} />
+            {loading ? 'Recherche...' : 'Chercher'}
+          </button>
+        </form>
+
+        {loading && <div className="loading-center"><div className="spinner dark" /></div>}
+
+        {!loading && searched && (
+          results.length === 0 ? (
+            <div className="card">
+              <div className="empty-state">
+                <Package size={36} className="empty-state-icon" />
+                <p className="empty-state-title">Aucun colis trouvé</p>
+                <p className="empty-state-sub">Vérifiez le numéro et réessayez.</p>
+              </div>
+            </div>
           ) : (
-            <div className="table-wrapper">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Nom</th>
-                    <th>Email</th>
-                    <th>Rôle</th>
-                    <th>Statut</th>
-                    <th>Créé le</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map(u => (
-                    <tr key={u.id}>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <div style={{
-                            width: 32, height: 32, borderRadius: '50%',
-                            background: 'var(--accent)', color: 'white',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            fontSize: '12px', fontWeight: 700, flexShrink: 0,
-                            fontFamily: 'var(--font-display)',
-                          }}>
-                            {(u.full_name || '?').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {results.map((r, i) => (
+                <div key={i} className="card" style={{ overflow: 'hidden' }}>
+                  {/* Header */}
+                  <div style={{ padding: '12px 16px', background: 'var(--gray-50)', borderBottom: '1px solid var(--gray-100)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                    <code style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 700, background: 'var(--gray-200)', padding: '3px 10px', borderRadius: 6 }}>
+                      {r.barcode}
+                    </code>
+                    {r.excluded && <span className="badge badge-gray">Reprise</span>}
+                    {r.was_missing && (
+                      <span className="badge badge-red" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <XCircle size={11} /> Manquant à l'archivage
+                      </span>
+                    )}
+                    {r.last_scan_result ? resultBadge(r.last_scan_result) : (
+                      <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>Non scanné</span>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 0 }}>
+                    {/* Tournée */}
+                    <div style={{ padding: '12px 16px', borderRight: '1px solid var(--gray-100)', borderBottom: '1px solid var(--gray-100)' }}>
+                      <div style={{ fontSize: 11, color: 'var(--gray-400)', marginBottom: 4 }}>Tournée</div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: 'var(--gray-800)' }}>
+                        {r.reference_name || r.tour_name}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 2 }}>
+                        {r.delivery_date ? new Date(r.delivery_date + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+                      </div>
+                    </div>
+
+                    {/* Dernier scan */}
+                    <div style={{ padding: '12px 16px', borderRight: '1px solid var(--gray-100)', borderBottom: '1px solid var(--gray-100)' }}>
+                      <div style={{ fontSize: 11, color: 'var(--gray-400)', marginBottom: 4 }}>Dernier scan</div>
+                      {r.last_scan_at ? (
+                        <>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-800)' }}>
+                            {new Date(r.last_scan_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                           </div>
-                          <span style={{ fontWeight: 500 }}>{u.full_name || '—'}</span>
+                          <div style={{ fontSize: 11, color: 'var(--gray-400)' }}>
+                            {new Date(r.last_scan_at).toLocaleDateString('fr-FR')}
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{ fontSize: 13, color: 'var(--gray-300)' }}>—</div>
+                      )}
+                    </div>
+
+                    {/* Scanné par */}
+                    <div style={{ padding: '12px 16px', borderRight: '1px solid var(--gray-100)', borderBottom: '1px solid var(--gray-100)' }}>
+                      <div style={{ fontSize: 11, color: 'var(--gray-400)', marginBottom: 4 }}>Scanné par</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-800)' }}>
+                        {r.last_scan_by || <span style={{ color: 'var(--gray-300)' }}>—</span>}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 2 }}>
+                        {r.scan_count > 0 ? `${r.scan_count} scan${r.scan_count > 1 ? 's' : ''} au total` : 'Aucun scan'}
+                      </div>
+                    </div>
+
+                    {/* Mauvaise tournée */}
+                    {r.last_scan_result === 'wrong_tour' && r.wrong_tour_name && (
+                      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--gray-100)', background: '#fff5f5' }}>
+                        <div style={{ fontSize: 11, color: 'var(--red)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <AlertTriangle size={11} /> Scanned dans mauvaise tournée
                         </div>
-                      </td>
-                      <td style={{ color: 'var(--gray-500)' }}>{u.email}</td>
-                      <td>
-                        <select
-                          value={u.role}
-                          onChange={e => updateRole(u.id, e.target.value)}
-                          style={{
-                            border: '1px solid var(--gray-200)', borderRadius: '6px',
-                            padding: '4px 8px', fontSize: '13px', background: 'white',
-                            color: 'var(--gray-700)', cursor: 'pointer',
-                          }}
-                        >
-                          <option value="operator">Opérateur</option>
-                          <option value="admin">Administrateur</option>
-                          <option value="partner">Partenaire</option>
-                        </select>
-                      </td>
-                      <td>
-                        <span className={`badge ${u.active ? 'badge-green' : 'badge-gray'}`}>
-                          {u.active ? 'Actif' : 'Inactif'}
-                        </span>
-                      </td>
-                      <td style={{ color: 'var(--gray-400)', fontSize: '13px' }}>
-                        {new Date(u.created_at).toLocaleDateString('fr-FR')}
-                      </td>
-                      <td>
-                        <button className="btn btn-ghost btn-sm" onClick={() => toggleActive(u)}>
-                          {u.active ? 'Désactiver' : 'Activer'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--red)' }}>
+                          {r.wrong_tour_name}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Tâches liées */}
+                    {(demandesByBarcode[r.barcode] || []).length > 0 && (
+                      <div style={{ padding: '12px 16px', borderTop: '1px solid var(--gray-100)', gridColumn: '1 / -1' }}>
+                        <div style={{ fontSize: 11, color: 'var(--gray-400)', marginBottom: 6 }}>Tâches liées</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {demandesByBarcode[r.barcode].map(d => {
+                            const t = DEMANDE_TYPE_LABELS[d.type] || DEMANDE_TYPE_LABELS.autre
+                            return (
+                              <span
+                                key={d.id}
+                                className={`badge ${t.badge}`}
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => goToDemande(d)}
+                                title="Voir la demande"
+                              >
+                                <ClipboardList size={11} /> {t.label}
+                                {d.status === 'resolue' && ' ✓'}
+                              </span>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
-          )}
-        </div>
+          )
+        )}
       </div>
-
-      {/* Modal création */}
-      {showModal && (
-        <div className="modal-backdrop" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <h3 className="modal-title">Nouvel utilisateur</h3>
-                <button className="btn btn-ghost btn-sm" onClick={() => setShowModal(false)}>
-                  <X size={16} />
-                </button>
-              </div>
-            </div>
-            <form onSubmit={handleCreate}>
-              <div className="modal-body">
-                <div className="form-group">
-                  <label className="form-label">Nom complet</label>
-                  <input
-                    className="form-input" required
-                    value={form.full_name}
-                    onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))}
-                    placeholder="Prénom Nom"
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Email</label>
-                  <input
-                    className="form-input" type="email" required
-                    value={form.email}
-                    onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                    placeholder="email@exemple.com"
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Mot de passe temporaire</label>
-                  <input
-                    className="form-input" type="password" required
-                    value={form.password}
-                    onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-                    placeholder="Min. 6 caractères"
-                    minLength={6}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Rôle</label>
-                  <select
-                    className="form-input"
-                    value={form.role}
-                    onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
-                  >
-                    <option value="operator">Opérateur</option>
-                    <option value="admin">Administrateur</option>
-                    <option value="partner">Partenaire</option>
-                  </select>
-                </div>
-
-                <div style={{
-                  padding: '12px 14px', background: 'var(--blue-light)',
-                  borderRadius: 'var(--radius-sm)', fontSize: '13px', color: '#1e40af'
-                }}>
-                  ℹ️ L'utilisateur recevra un email de confirmation. Il pourra se connecter immédiatement avec le mot de passe temporaire.
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>
-                  Annuler
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={saving}>
-                  {saving ? <><div className="spinner" /> Création...</> : 'Créer l\'utilisateur'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </>
   )
 }
