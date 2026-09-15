@@ -35,6 +35,10 @@ export default function Inventaire() {
   const [rapportData, setRapportData] = useState({ wrongZone: [], unknown: [], missing: [] })
   const [missingCorrected, setMissingCorrected] = useState(new Set())
   const [loadingRapport, setLoadingRapport] = useState(false)
+  const [showCorrected, setShowCorrected] = useState(false)
+  const [archivedZones, setArchivedZones] = useState(new Set())
+  const [showArchivedZones, setShowArchivedZones] = useState(false)
+  const [showClosedSessions, setShowClosedSessions] = useState(false)
 
   const inputRef = useRef()
   const scanInputRef = useRef(null)
@@ -47,9 +51,10 @@ export default function Inventaire() {
     const off = () => setOnline(false)
     window.addEventListener('online', on)
     window.addEventListener('offline', off)
-    fetchSessions()
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
   }, [])
+
+  useEffect(() => { fetchSessions() }, [showClosedSessions])
 
   useEffect(() => {
     if (step !== 'scan' || manualMode) return
@@ -70,12 +75,50 @@ export default function Inventaire() {
   }, [manualMode])
 
   async function fetchSessions() {
-    const { data } = await supabase
+    let query = supabase
       .from('inventory_sessions')
       .select('*')
       .order('created_at', { ascending: false })
-      .limit(5)
+      .limit(showClosedSessions ? 20 : 5)
+    if (!showClosedSessions) query = query.eq('status', 'active')
+    const { data } = await query
     setSessions(data || [])
+  }
+
+  async function closeSession(sessionId) {
+    const { error } = await supabase.from('inventory_sessions').update({ status: 'closed' }).eq('id', sessionId)
+    if (error) return toast.error('Erreur : ' + error.message)
+    toast.success('Inventaire clôturé')
+    setStep('import')
+    fetchSessions()
+  }
+
+  async function reopenSession(sessionId) {
+    const { error } = await supabase.from('inventory_sessions').update({ status: 'active' }).eq('id', sessionId)
+    if (error) return toast.error('Erreur : ' + error.message)
+    toast.success('Inventaire réouvert')
+    fetchSessions()
+  }
+
+  async function fetchArchivedZones(sessionId) {
+    const { data } = await supabase
+      .from('inventory_zone_archive')
+      .select('zone')
+      .eq('session_id', sessionId)
+      .eq('archived', true)
+    setArchivedZones(new Set((data || []).map(z => z.zone)))
+  }
+
+  async function toggleZoneArchive(zone, currentlyArchived) {
+    const { error } = await supabase
+      .from('inventory_zone_archive')
+      .upsert({ session_id: session.id, zone, archived: !currentlyArchived, archived_by: profile?.id, archived_at: new Date().toISOString() }, { onConflict: 'session_id,zone' })
+    if (error) return toast.error('Erreur : ' + error.message)
+    setArchivedZones(prev => {
+      const n = new Set(prev)
+      currentlyArchived ? n.delete(zone) : n.add(zone)
+      return n
+    })
   }
 
   async function fetchRapport(sessionId) {
@@ -177,6 +220,7 @@ export default function Inventaire() {
 
       setSession(sessionData)
       setZones(zonesSet)
+      setArchivedZones(new Set())
       setStep('zone')
       toast.success(`${items.length} colis importés — ${zonesSet.length} zones`)
       fetchSessions()
@@ -224,6 +268,7 @@ export default function Inventaire() {
       .eq('session_id', s.id)
     const zonesSet = [...new Set((itemsData || []).map(i => i.zone).filter(Boolean))].sort()
     setZones(zonesSet)
+    fetchArchivedZones(s.id)
     setStep('zone')
   }
 
@@ -268,14 +313,19 @@ export default function Inventaire() {
     }
 
     if (resultType === 'ok') {
+      const willComplete = items.length > 0 && (scannedBarcodes.size + 1) === items.length && !archivedZones.has(selectedZone)
       setScannedBarcodes(prev => new Set([...prev, bc]))
+      if (willComplete) {
+        toggleZoneArchive(selectedZone, false)
+        toast.success(`Zone ${selectedZone} complète — archivée automatiquement`)
+      }
     }
     setScans(prev => [{ barcode_scanned: bc, result_type: resultType, real_zone: realZone, scanned_at: new Date().toISOString() }, ...prev])
 
     if (popupTimer.current) clearTimeout(popupTimer.current)
     setPopup({ type: resultType, barcode: bc, realZone })
     popupTimer.current = setTimeout(() => setPopup(null), POPUP_DURATION)
-  }, [session, selectedZone, scannedBarcodes, profile])
+  }, [session, selectedZone, scannedBarcodes, profile, items, archivedZones])
 
   function handleScanInput(e) {
     const val = e.target.value
@@ -356,14 +406,27 @@ export default function Inventaire() {
 
         {sessions.length > 0 && (
           <div className="card" style={{ marginTop: 16 }}>
-            <div className="card-header"><span className="card-title">Sessions récentes</span></div>
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span className="card-title">Sessions récentes</span>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--gray-500)', cursor: 'pointer', fontWeight: 400 }}>
+                <input type="checkbox" checked={showClosedSessions} onChange={e => setShowClosedSessions(e.target.checked)} />
+                Afficher les inventaires clôturés
+              </label>
+            </div>
             {sessions.map(s => (
               <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: '1px solid var(--gray-100)' }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{s.filename}</div>
+                  <div style={{ fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {s.filename}
+                    {s.status === 'closed' && <span className="badge badge-gray">Clôturé</span>}
+                  </div>
                   <div style={{ fontSize: 11, color: 'var(--gray-400)' }}>{new Date(s.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}</div>
                 </div>
-                <button className="btn btn-secondary btn-sm" onClick={() => resumeSession(s)}>Reprendre</button>
+                {s.status === 'closed' ? (
+                  <button className="btn btn-ghost btn-sm" onClick={() => reopenSession(s.id)}>Réouvrir</button>
+                ) : (
+                  <button className="btn btn-secondary btn-sm" onClick={() => resumeSession(s)}>Reprendre</button>
+                )}
               </div>
             ))}
           </div>
@@ -373,7 +436,9 @@ export default function Inventaire() {
   )
 
   // STEP: ZONE
-  if (step === 'zone') return (
+  if (step === 'zone') {
+    const visibleZones = zones.filter(z => showArchivedZones || !archivedZones.has(z))
+    return (
     <>
       <div className="page-header">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -386,29 +451,58 @@ export default function Inventaire() {
             <button className="btn btn-secondary btn-sm" onClick={() => { fetchRapport(session.id); setStep('rapport') }}>
               📋 Compte rendu
             </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => { if (confirm('Clôturer cet inventaire ? Il n\'apparaîtra plus dans la liste par défaut.')) closeSession(session.id) }}>
+              Clôturer l'inventaire
+            </button>
           </div>
         </div>
       </div>
       <div className="page-body">
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--gray-500)', marginBottom: 14, cursor: 'pointer' }}>
+          <input type="checkbox" checked={showArchivedZones} onChange={e => setShowArchivedZones(e.target.checked)} />
+          Afficher les emplacements archivés
+        </label>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 10 }}>
-          {zones.map(zone => (
-            <button
-              key={zone}
-              className="btn btn-secondary"
-              style={{ height: 70, fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 18, flexDirection: 'column' }}
-              onClick={() => selectZone(zone)}
-              disabled={loading}
-            >
-              {zone}
-            </button>
-          ))}
+          {visibleZones.map(zone => {
+            const isArchived = archivedZones.has(zone)
+            return (
+              <div key={zone} style={{ position: 'relative' }}>
+                <button
+                  className="btn btn-secondary"
+                  style={{ height: 70, width: '100%', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 18, flexDirection: 'column', opacity: isArchived ? 0.5 : 1 }}
+                  onClick={() => selectZone(zone)}
+                  disabled={loading}
+                >
+                  {zone}
+                  {isArchived && <span className="badge badge-gray" style={{ fontSize: 9, marginTop: 4 }}>Archivé</span>}
+                </button>
+                <button
+                  title={isArchived ? 'Désarchiver' : 'Archiver'}
+                  className="btn btn-ghost btn-sm"
+                  style={{ position: 'absolute', top: 2, right: 2, padding: '2px 4px', fontSize: 10 }}
+                  onClick={e => { e.stopPropagation(); toggleZoneArchive(zone, isArchived) }}
+                >
+                  {isArchived ? '↺' : '🗀'}
+                </button>
+              </div>
+            )
+          })}
         </div>
+        {visibleZones.length === 0 && (
+          <p style={{ color: 'var(--gray-400)', fontSize: 13, textAlign: 'center', marginTop: 24 }}>
+            Toutes les zones sont archivées. Coche la case ci-dessus pour les afficher.
+          </p>
+        )}
       </div>
     </>
-  )
+  )}
 
   // STEP: RAPPORT
-  if (step === 'rapport') return (
+  if (step === 'rapport') {
+    const visibleWrongZone = rapportData.wrongZone.filter(s => showCorrected || !s.corrected)
+    const visibleUnknown = rapportData.unknown.filter(s => showCorrected || !s.corrected)
+    const visibleMissing = (rapportData.missing || []).filter(item => showCorrected || !missingCorrected.has(item.barcode))
+    return (
     <>
       <div className="page-header">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -420,6 +514,10 @@ export default function Inventaire() {
         </div>
       </div>
       <div className="page-body">
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--gray-500)', marginBottom: 14, cursor: 'pointer' }}>
+          <input type="checkbox" checked={showCorrected} onChange={e => setShowCorrected(e.target.checked)} />
+          Afficher les lignes corrigées
+        </label>
         {loadingRapport ? (
           <div className="loading-center"><div className="spinner dark" /></div>
         ) : (
@@ -430,11 +528,13 @@ export default function Inventaire() {
                 <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: '#991b1b' }}>
                   ⚠️ Colis mal positionnés
                 </span>
-                <span className="badge badge-red">{rapportData.wrongZone.length}</span>
+                <span className="badge badge-red">{visibleWrongZone.length}</span>
               </div>
-              {rapportData.wrongZone.length === 0 ? (
-                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--gray-400)', fontSize: 13 }}>Aucun colis mal positionné</div>
-              ) : rapportData.wrongZone.map(s => (
+              {visibleWrongZone.length === 0 ? (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--gray-400)', fontSize: 13 }}>
+                  {rapportData.wrongZone.length === 0 ? 'Aucun colis mal positionné' : 'Tout est corrigé ✓'}
+                </div>
+              ) : visibleWrongZone.map(s => (
                 <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: '1px solid var(--gray-100)', background: s.corrected ? '#f0fdf4' : undefined, opacity: s.corrected ? 0.6 : 1 }}>
                   <div style={{ flex: 1 }}>
                     <code style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-800)' }}>{s.barcode_scanned}</code>
@@ -459,11 +559,13 @@ export default function Inventaire() {
                 <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: '#991b1b' }}>
                   📦 Colis manquants
                 </span>
-                <span className="badge badge-red">{rapportData.missing?.length || 0}</span>
+                <span className="badge badge-red">{visibleMissing.length}</span>
               </div>
-              {!rapportData.missing?.length ? (
-                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--gray-400)', fontSize: 13 }}>Aucun colis manquant</div>
-              ) : rapportData.missing.map((item, i) => (
+              {!visibleMissing.length ? (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--gray-400)', fontSize: 13 }}>
+                  {!rapportData.missing?.length ? 'Aucun colis manquant' : 'Tout est corrigé ✓'}
+                </div>
+              ) : visibleMissing.map((item, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: '1px solid var(--gray-100)', background: missingCorrected.has(item.barcode) ? '#f0fdf4' : undefined, opacity: missingCorrected.has(item.barcode) ? 0.6 : 1 }}>
                   <div style={{ flex: 1 }}>
                     <code style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-800)' }}>{item.barcode}</code>
@@ -488,11 +590,13 @@ export default function Inventaire() {
                 <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: '#92400e' }}>
                   ❓ Colis non présents dans l'inventaire
                 </span>
-                <span className="badge badge-orange">{rapportData.unknown.length}</span>
+                <span className="badge badge-orange">{visibleUnknown.length}</span>
               </div>
-              {rapportData.unknown.length === 0 ? (
-                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--gray-400)', fontSize: 13 }}>Aucun colis inconnu</div>
-              ) : rapportData.unknown.map(s => (
+              {visibleUnknown.length === 0 ? (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--gray-400)', fontSize: 13 }}>
+                  {rapportData.unknown.length === 0 ? 'Aucun colis inconnu' : 'Tout est corrigé ✓'}
+                </div>
+              ) : visibleUnknown.map(s => (
                 <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: '1px solid var(--gray-100)', background: s.corrected ? '#f0fdf4' : undefined, opacity: s.corrected ? 0.6 : 1 }}>
                   <div style={{ flex: 1 }}>
                     <code style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-800)' }}>{s.barcode_scanned}</code>
@@ -514,7 +618,7 @@ export default function Inventaire() {
         )}
       </div>
     </>
-  )
+  )}
 
   // STEP: SCAN
   return (
