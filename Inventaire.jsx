@@ -327,12 +327,31 @@ export default function Inventaire() {
     popupTimer.current = setTimeout(() => setPopup(null), POPUP_DURATION)
   }, [session, selectedZone, scannedBarcodes, profile, items, archivedZones])
 
+  // Traite un texte pouvant contenir plusieurs BP (un par ligne, ou séparés par
+  // espaces/virgules/points-virgules/tabulations) — utile pour le copier/coller.
+  async function processBarcodesBatch(text) {
+    const codes = text
+      .split(/[\n\r\t,;]+|\s{2,}|\s(?=\S{5,})/)
+      .map(c => c.trim())
+      .filter(c => c.length >= 5)
+    if (codes.length === 0) return
+    if (codes.length === 1) {
+      await processScan(codes[0])
+      return
+    }
+    toast.success(`${codes.length} BP collés — traitement en cours...`)
+    for (const bc of codes) {
+      await processScan(bc)
+      await new Promise(r => setTimeout(r, 80))
+    }
+  }
+
   function handleScanInput(e) {
     const val = e.target.value
     setScanInput(val)
     if (val.includes('\n') || val.includes('\r')) {
-      const bc = val.replace(/[\n\r]/g, '').trim()
-      if (bc.length >= 5) { processScan(bc); setScanInput('') }
+      processBarcodesBatch(val)
+      setScanInput('')
       return
     }
     if (bufferTimer.current) clearTimeout(bufferTimer.current)
@@ -340,6 +359,15 @@ export default function Inventaire() {
       const bc = val.trim()
       if (bc.length >= 5) { processScan(bc); setScanInput('') }
     }, 150)
+  }
+
+  function handleScanPaste(e) {
+    const text = e.clipboardData?.getData('text')
+    if (text && (text.includes('\n') || text.trim().split(/\s+/).length > 1)) {
+      e.preventDefault()
+      processBarcodesBatch(text)
+      setScanInput('')
+    }
   }
 
   function handleScanKeyDown(e) {
@@ -351,8 +379,8 @@ export default function Inventaire() {
   }
 
   function handleManualSubmit() {
-    const bc = manualInput.trim()
-    if (bc.length >= 5) { processScan(bc); setManualInput(''); if (manualInputRef.current) manualInputRef.current.focus() }
+    const text = manualInput.trim()
+    if (text.length >= 5) { processBarcodesBatch(text); setManualInput(''); if (manualInputRef.current) manualInputRef.current.focus() }
   }
 
   const scanned = scannedBarcodes.size
@@ -689,17 +717,18 @@ export default function Inventaire() {
         {manualMode ? (
           <div style={{ background: 'var(--white)', borderRadius: 'var(--radius)', border: '2px solid var(--accent)', padding: 14, display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 10 }}>
             <div style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Keyboard size={13} /> Saisie manuelle
+              <Keyboard size={13} /> Saisie manuelle — coller un ou plusieurs BP
             </div>
-            <input
+            <textarea
               ref={manualInputRef}
               className="form-input"
               value={manualInput}
               onChange={e => setManualInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') handleManualSubmit(); if (e.key === 'Escape') { setManualMode(false); setManualInput('') } }}
-              placeholder="Numéro de colis"
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleManualSubmit() }; if (e.key === 'Escape') { setManualMode(false); setManualInput('') } }}
+              placeholder={'Numéro de colis\nou plusieurs numéros collés (un par ligne)'}
               autoComplete="off"
-              style={{ fontSize: 18, fontFamily: 'monospace', letterSpacing: 1, textAlign: 'center' }}
+              rows={manualInput.includes('\n') ? 4 : 1}
+              style={{ fontSize: 16, fontFamily: 'monospace', letterSpacing: 1, textAlign: 'center', resize: 'vertical' }}
             />
             <button className="btn btn-primary w-full" onClick={handleManualSubmit} disabled={manualInput.trim().length < 5} style={{ justifyContent: 'center' }}>Valider</button>
             <button className="btn btn-ghost btn-sm" onClick={() => { setManualMode(false); setManualInput('') }} style={{ alignSelf: 'center', color: 'var(--gray-400)', fontSize: 12 }}>← Retour au scan TC51</button>
@@ -708,9 +737,11 @@ export default function Inventaire() {
           <div
             style={{ background: 'var(--white)', borderRadius: 'var(--radius)', border: `2px dashed ${popup ? SCAN_RESULTS[popup.type].color : 'var(--gray-200)'}`, padding: '20px 16px', textAlign: 'center', marginBottom: 10, cursor: 'text', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}
             onClick={() => scanInputRef.current?.focus()}
+            onPaste={handleScanPaste}
           >
             <Package size={24} color="var(--gray-200)" />
             <p style={{ fontSize: 13, color: 'var(--gray-400)', fontWeight: 500, margin: 0 }}>Zone de scan active — Zone {selectedZone}</p>
+            <p style={{ fontSize: 11, color: 'var(--gray-300)', margin: 0 }}>Cliquez ici puis Ctrl+V pour coller un ou plusieurs BP</p>
             {scanInput && <div style={{ fontFamily: 'monospace', fontSize: 18, color: 'var(--accent)', fontWeight: 600 }}>{scanInput}</div>}
           </div>
         )}
