@@ -79,6 +79,7 @@ export default function App() {
       {/* Operator routes */}
       <Route path="/operator" element={<PrivateRoute roles={['operator', 'admin']}><OperatorLayout /></PrivateRoute>}>
         <Route index element={<OperatorHome />} />
+        <Route path="inventaire" element={<Inventaire />} />
         <Route path="search-parcel" element={<SearchParcel />} />
         <Route path="scan/:tourId" element={<ScanPage />} />
       </Route>
