@@ -59,9 +59,12 @@ export default function Inventaire() {
   useEffect(() => {
     if (step !== 'scan' || manualMode) return
     const keepFocus = () => {
-      if (scanInputRef.current && document.activeElement !== scanInputRef.current) {
-        scanInputRef.current.focus()
-      }
+      if (!scanInputRef.current || document.activeElement === scanInputRef.current) return
+      // Ne pas reprendre le focus si l'utilisateur est en train de sélectionner
+      // du texte (pour copier un BP affiché) : focus() annulerait la sélection.
+      const sel = window.getSelection()
+      if (sel && sel.toString().length > 0) return
+      scanInputRef.current.focus()
     }
     const interval = setInterval(keepFocus, 300)
     if (scanInputRef.current) scanInputRef.current.focus()
