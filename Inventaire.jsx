@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { supabase } from './supabase'
 import { useAuth } from './AuthContext'
-import { Upload, FileText, X, Package, AlertTriangle, CheckCircle, Wifi, WifiOff, Keyboard, RefreshCw } from 'lucide-react'
+import { Upload, FileText, X, Package, AlertTriangle, CheckCircle, Wifi, WifiOff, Keyboard, RefreshCw, Copy } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 
@@ -173,6 +173,28 @@ export default function Inventaire() {
       wrongZone: prev.wrongZone.map(s => s.id === scanId ? { ...s, corrected: !corrected } : s),
       unknown: prev.unknown.map(s => s.id === scanId ? { ...s, corrected: !corrected } : s),
     }))
+  }
+
+  async function copyBarcode(bc) {
+    try {
+      await navigator.clipboard.writeText(bc)
+      toast.success(`${bc} copié`)
+    } catch {
+      toast.error('Impossible de copier')
+    }
+  }
+
+  function CopyBtn({ value, size = 12 }) {
+    return (
+      <button
+        type="button"
+        onClick={e => { e.stopPropagation(); copyBarcode(value) }}
+        title="Copier ce BP"
+        style={{ background: 'none', border: 'none', padding: 4, cursor: 'pointer', color: 'var(--gray-400)', display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}
+      >
+        <Copy size={size} />
+      </button>
+    )
   }
 
   function handleDrop(e) {
@@ -569,6 +591,7 @@ export default function Inventaire() {
                 <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: '1px solid var(--gray-100)', background: s.corrected ? '#f0fdf4' : undefined, opacity: s.corrected ? 0.6 : 1 }}>
                   <div style={{ flex: 1 }}>
                     <code style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-800)' }}>{s.barcode_scanned}</code>
+                    <CopyBtn value={s.barcode_scanned} />
                     <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 2 }}>
                       Scanné dans <strong>{s.zone_selectionnee}</strong> → Devrait être en <strong style={{ color: '#dc2626' }}>{s.real_zone}</strong>
                     </div>
@@ -600,6 +623,7 @@ export default function Inventaire() {
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: '1px solid var(--gray-100)', background: missingCorrected.has(item.barcode) ? '#f0fdf4' : undefined, opacity: missingCorrected.has(item.barcode) ? 0.6 : 1 }}>
                   <div style={{ flex: 1 }}>
                     <code style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-800)' }}>{item.barcode}</code>
+                    <CopyBtn value={item.barcode} />
                     <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 2 }}>
                       Zone attendue : <strong>{item.zone}</strong>
                     </div>
@@ -631,6 +655,7 @@ export default function Inventaire() {
                 <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: '1px solid var(--gray-100)', background: s.corrected ? '#f0fdf4' : undefined, opacity: s.corrected ? 0.6 : 1 }}>
                   <div style={{ flex: 1 }}>
                     <code style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-800)' }}>{s.barcode_scanned}</code>
+                    <CopyBtn value={s.barcode_scanned} />
                     <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 2 }}>
                       Scanné dans zone <strong>{s.zone_selectionnee}</strong> — absent du fichier stock
                     </div>
@@ -761,6 +786,7 @@ export default function Inventaire() {
                 <div key={p.barcode} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderBottom: '1px solid var(--gray-100)' }}>
                   <span style={{ color: 'var(--red)', fontSize: 10, fontWeight: 700 }}>✗</span>
                   <code style={{ fontSize: 12, color: 'var(--gray-600)', flex: 1 }}>{p.barcode}</code>
+                  <CopyBtn value={p.barcode} />
                   {p.libelle && <span style={{ fontSize: 10, color: 'var(--gray-400)' }}>{p.libelle.slice(0, 20)}</span>}
                 </div>
               ))}
@@ -781,6 +807,7 @@ export default function Inventaire() {
                   {SCAN_RESULTS[s.result_type]?.icon}
                 </span>
                 <code style={{ fontSize: 11, color: 'var(--gray-700)', flex: 1 }}>{s.barcode_scanned}</code>
+                <CopyBtn value={s.barcode_scanned} />
                 {s.real_zone && <span style={{ fontSize: 10, color: 'var(--red)' }}>→ {s.real_zone}</span>}
                 <span style={{ fontSize: 10, color: 'var(--gray-400)' }}>{new Date(s.scanned_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
               </div>
