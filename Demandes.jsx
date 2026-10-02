@@ -17,13 +17,20 @@ const TYPES = {
 
 const BP_REQUIRED_TYPES = ['securisation', 'ajout_non_planifie', 'recherche_colis']
 
+const STATUS_META = {
+  ouverte: { label: 'Ouverte', badge: 'badge-orange' },
+  resolue: { label: 'Résolue', badge: 'badge-green' },
+  annulee: { label: 'Annulée', badge: 'badge-red' },
+  cloturee: { label: 'Clôturée', badge: 'badge-gray' },
+}
+
 export default function Demandes() {
   const { profile } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const basePath = profile?.role === 'admin' ? '/admin' : profile?.role === 'operator' ? '/operator' : '/partner'
 
   const canCreate = true
-  const canValidate = profile?.role === 'admin'
+  const canValidate = profile?.role === 'admin' || profile?.role === 'partner'
   const canLinkToSearch = profile?.role !== 'partner'
 
   const [demandes, setDemandes] = useState([])
@@ -106,6 +113,8 @@ export default function Demandes() {
           {[
             { value: 'ouverte', label: 'Ouvertes' },
             { value: 'resolue', label: 'Résolues' },
+            { value: 'annulee', label: 'Annulées' },
+            { value: 'cloturee', label: 'Clôturées' },
             { value: 'all', label: 'Toutes' },
           ].map(f => (
             <button
@@ -200,8 +209,8 @@ export default function Demandes() {
                           {d.commentaire || <span style={{ color: 'var(--gray-300)' }}>—</span>}
                         </td>
                         <td>
-                          <span className={`badge ${d.status === 'resolue' ? 'badge-green' : 'badge-orange'}`}>
-                            {d.status === 'resolue' ? 'Résolue' : 'Ouverte'}
+                          <span className={`badge ${(STATUS_META[d.status] || STATUS_META.ouverte).badge}`}>
+                            {(STATUS_META[d.status] || STATUS_META.ouverte).label}
                           </span>
                         </td>
                         <td style={{ fontSize: '13px' }}>{d.created_by_user?.full_name || d.created_by_user?.email || '—'}</td>
@@ -410,31 +419,23 @@ function DemandeDetailModal({ demande, basePath, canValidate, canLinkToSearch, o
     fetchReponses()
   }
 
-  async function handleValidate() {
+  async function setDemandeStatus(newStatus, successMessage, { clearResolved = false } = {}) {
     setResolving(true)
-    const { error } = await supabase
-      .from('demandes')
-      .update({ status: 'resolue', resolved_by: user.id, resolved_at: new Date().toISOString() })
-      .eq('id', demande.id)
+    const payload = clearResolved
+      ? { status: newStatus, resolved_by: null, resolved_at: null }
+      : { status: newStatus, resolved_by: user.id, resolved_at: new Date().toISOString() }
+    const { error } = await supabase.from('demandes').update(payload).eq('id', demande.id)
     setResolving(false)
     if (error) return toast.error('Erreur : ' + error.message)
-    toast.success('Demande marquée comme réalisée')
-    setStatus('resolue')
+    toast.success(successMessage)
+    setStatus(newStatus)
     onChanged()
   }
 
-  async function handleReopen() {
-    setResolving(true)
-    const { error } = await supabase
-      .from('demandes')
-      .update({ status: 'ouverte', resolved_by: null, resolved_at: null })
-      .eq('id', demande.id)
-    setResolving(false)
-    if (error) return toast.error('Erreur : ' + error.message)
-    toast.success('Demande rouverte')
-    setStatus('ouverte')
-    onChanged()
-  }
+  const handleValidate = () => setDemandeStatus('resolue', 'Demande marquée comme réalisée')
+  const handleCancel = () => setDemandeStatus('annulee', 'Demande annulée')
+  const handleClose = () => setDemandeStatus('cloturee', 'Demande clôturée')
+  const handleReopen = () => setDemandeStatus('ouverte', 'Demande rouverte', { clearResolved: true })
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -443,8 +444,8 @@ function DemandeDetailModal({ demande, basePath, canValidate, canLinkToSearch, o
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span className={`badge ${t.badge}`}>{t.label}</span>
-              <span className={`badge ${status === 'resolue' ? 'badge-green' : 'badge-orange'}`}>
-                {status === 'resolue' ? 'Résolue' : 'Ouverte'}
+              <span className={`badge ${(STATUS_META[status] || STATUS_META.ouverte).badge}`}>
+                {(STATUS_META[status] || STATUS_META.ouverte).label}
               </span>
             </div>
             <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={16} /></button>
@@ -487,8 +488,8 @@ function DemandeDetailModal({ demande, basePath, canValidate, canLinkToSearch, o
           <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>
             Créée par {demande.created_by_user?.full_name || demande.created_by_user?.email || '—'} le{' '}
             {new Date(demande.created_at).toLocaleString('fr-FR')}
-            {status === 'resolue' && demande.resolved_at && (
-              <> · Résolue par {demande.resolved_by_user?.full_name || demande.resolved_by_user?.email || '—'} le {new Date(demande.resolved_at).toLocaleString('fr-FR')}</>
+            {status !== 'ouverte' && demande.resolved_at && (
+              <> · {STATUS_META[status]?.label || 'Mise à jour'} par {demande.resolved_by_user?.full_name || demande.resolved_by_user?.email || '—'} le {new Date(demande.resolved_at).toLocaleString('fr-FR')}</>
             )}
           </div>
 
@@ -532,12 +533,31 @@ function DemandeDetailModal({ demande, basePath, canValidate, canLinkToSearch, o
         </div>
 
         {canValidate && (
-          <div className="modal-footer">
+          <div className="modal-footer" style={{ flexWrap: 'wrap', gap: '8px' }}>
             <button type="button" className="btn btn-secondary" onClick={onClose}>Fermer</button>
             {status === 'ouverte' ? (
-              <button type="button" className="btn btn-primary" onClick={handleValidate} disabled={resolving}>
-                {resolving ? <><div className="spinner" /> ...</> : <><CheckCircle2 size={15} /> Marquer comme réalisée</>}
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => { if (confirm('Annuler cette demande ?')) handleCancel() }}
+                  disabled={resolving}
+                  style={{ color: 'var(--red)' }}
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => { if (confirm('Clôturer cette demande ?')) handleClose() }}
+                  disabled={resolving}
+                >
+                  Clôturer
+                </button>
+                <button type="button" className="btn btn-primary" onClick={handleValidate} disabled={resolving}>
+                  {resolving ? <><div className="spinner" /> ...</> : <><CheckCircle2 size={15} /> Marquer comme réalisée</>}
+                </button>
+              </>
             ) : (
               <button type="button" className="btn btn-secondary" onClick={handleReopen} disabled={resolving}>
                 {resolving ? '...' : 'Rouvrir la demande'}
