@@ -5,8 +5,30 @@ import { useAuth } from './AuthContext'
 import toast from 'react-hot-toast'
 import {
   Plus, X, Package, ShieldAlert, PackagePlus, Search, MessageSquare,
-  CheckCircle2, Send, ClipboardList,
+  CheckCircle2, Send, ClipboardList, Camera,
 } from 'lucide-react'
+
+const PHOTO_BUCKET = 'demandes-photos'
+const MAX_PHOTOS = 5
+
+// Réduit la photo (max 1600 px, JPEG ~80 %) pour accélérer l'envoi, surtout depuis un téléphone.
+function compressImage(file, maxSize = 1600, quality = 0.8) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      const ratio = Math.min(1, maxSize / Math.max(img.width, img.height))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round(img.width * ratio)
+      canvas.height = Math.round(img.height * ratio)
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+      URL.revokeObjectURL(url)
+      canvas.toBlob(blob => (blob ? resolve(blob) : reject(new Error('Compression impossible'))), 'image/jpeg', quality)
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image illisible')) }
+    img.src = url
+  })
+}
 
 const TYPES = {
   securisation: { label: 'Sécurisation', badge: 'badge-red', icon: ShieldAlert },
@@ -207,6 +229,11 @@ export default function Demandes() {
                         </td>
                         <td style={{ maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--gray-600)' }}>
                           {d.commentaire || <span style={{ color: 'var(--gray-300)' }}>—</span>}
+                          {(d.photos || []).length > 0 && (
+                            <span title={`${d.photos.length} photo(s)`} style={{ marginLeft: 8, color: 'var(--gray-400)', display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 12 }}>
+                              <Camera size={12} /> {d.photos.length}
+                            </span>
+                          )}
                         </td>
                         <td>
                           <span className={`badge ${(STATUS_META[d.status] || STATUS_META.ouverte).badge}`}>
@@ -258,9 +285,27 @@ function CreateDemandeModal({ onClose, onCreated }) {
   const [bpInput, setBpInput] = useState('')
   const [bpList, setBpList] = useState([])
   const [commentaire, setCommentaire] = useState('')
+  const [photos, setPhotos] = useState([]) // [{ file, preview }]
   const [saving, setSaving] = useState(false)
 
   const bpRequired = BP_REQUIRED_TYPES.includes(type)
+
+  function handlePhotoChange(e) {
+    const files = Array.from(e.target.files || [])
+    e.target.value = '' // permet de re-sélectionner la même photo
+    if (files.length === 0) return
+    const room = MAX_PHOTOS - photos.length
+    if (files.length > room) toast.error(`${MAX_PHOTOS} photos maximum par demande`)
+    const accepted = files.filter(f => f.type.startsWith('image/')).slice(0, Math.max(room, 0))
+    setPhotos(prev => [...prev, ...accepted.map(file => ({ file, preview: URL.createObjectURL(file) }))])
+  }
+
+  function removePhoto(index) {
+    setPhotos(prev => {
+      URL.revokeObjectURL(prev[index].preview)
+      return prev.filter((_, i) => i !== index)
+    })
+  }
 
   function addBp() {
     const value = bpInput.trim()
@@ -287,10 +332,31 @@ function CreateDemandeModal({ onClose, onCreated }) {
       return
     }
     setSaving(true)
+
+    // L'id est généré ici pour ranger les photos dans un dossier à son nom
+    // et n'insérer la demande qu'une fois les photos envoyées (pas de demande orpheline).
+    const demandeId = crypto.randomUUID()
+    const photoPaths = []
+    try {
+      for (let i = 0; i < photos.length; i++) {
+        const blob = await compressImage(photos[i].file)
+        const path = `${demandeId}/${Date.now()}-${i}.jpg`
+        const { error: upErr } = await supabase.storage.from(PHOTO_BUCKET).upload(path, blob, { contentType: 'image/jpeg' })
+        if (upErr) throw upErr
+        photoPaths.push(path)
+      }
+    } catch (err) {
+      setSaving(false)
+      toast.error('Erreur lors de l\'envoi des photos : ' + (err.message || err))
+      return
+    }
+
     const { error } = await supabase.from('demandes').insert({
+      id: demandeId,
       type,
       bp: bpList,
       commentaire: commentaire.trim() || null,
+      photos: photoPaths,
       status: 'ouverte',
       created_by: user.id,
     })
@@ -299,6 +365,7 @@ function CreateDemandeModal({ onClose, onCreated }) {
       toast.error('Erreur : ' + error.message)
       return
     }
+    photos.forEach(p => URL.revokeObjectURL(p.preview))
     toast.success('Demande créée')
     onCreated()
   }
@@ -364,11 +431,45 @@ function CreateDemandeModal({ onClose, onCreated }) {
                 onChange={e => setCommentaire(e.target.value)}
               />
             </div>
+
+            <div className="form-group">
+              <label className="form-label">Photos (facultatif)</label>
+              {photos.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+                  {photos.map((p, i) => (
+                    <div key={p.preview} style={{ position: 'relative', width: 72, height: 72 }}>
+                      <img
+                        src={p.preview}
+                        alt={`Photo ${i + 1}`}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'var(--radius-sm)', border: '1px solid var(--gray-200)' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removePhoto(i)}
+                        title="Retirer cette photo"
+                        style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', border: 'none', background: 'var(--gray-700)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {photos.length < MAX_PHOTOS && (
+                <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <Camera size={14} /> Ajouter une photo
+                  <input type="file" accept="image/*" multiple onChange={handlePhotoChange} style={{ display: 'none' }} />
+                </label>
+              )}
+              <p style={{ fontSize: '12px', color: 'var(--gray-400)', marginTop: 6 }}>
+                {photos.length}/{MAX_PHOTOS} — sur téléphone, vous pouvez prendre la photo directement.
+              </p>
+            </div>
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-secondary" onClick={onClose}>Annuler</button>
             <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? <><div className="spinner" /> Création...</> : 'Créer la demande'}
+              {saving ? <><div className="spinner" /> {photos.length > 0 ? 'Envoi des photos...' : 'Création...'}</> : 'Créer la demande'}
             </button>
           </div>
         </form>
@@ -388,10 +489,23 @@ function DemandeDetailModal({ demande, basePath, canValidate, canLinkToSearch, o
   const [sending, setSending] = useState(false)
   const [resolving, setResolving] = useState(false)
   const [status, setStatus] = useState(demande.status)
+  const [photoUrls, setPhotoUrls] = useState([])
+  const [replyPhotos, setReplyPhotos] = useState([]) // photos en cours de saisie : [{ file, preview }]
+  const [replyPhotoUrls, setReplyPhotoUrls] = useState({}) // chemin -> lien temporaire, pour les réponses déjà envoyées
 
   const t = TYPES[demande.type] || TYPES.autre
 
   useEffect(() => { fetchReponses() }, [demande.id])
+
+  // Le bucket est privé : on génère des liens temporaires (1 h) pour afficher les photos.
+  useEffect(() => {
+    const paths = demande.photos || []
+    if (paths.length === 0) { setPhotoUrls([]); return }
+    supabase.storage.from(PHOTO_BUCKET).createSignedUrls(paths, 3600).then(({ data, error }) => {
+      if (error) return toast.error('Photos indisponibles : ' + error.message)
+      setPhotoUrls((data || []).map(d => d.signedUrl).filter(Boolean))
+    })
+  }, [demande.id])
 
   async function fetchReponses() {
     setLoading(true)
@@ -402,19 +516,63 @@ function DemandeDetailModal({ demande, basePath, canValidate, canLinkToSearch, o
       .order('created_at', { ascending: true })
     setReponses(data || [])
     setLoading(false)
+
+    // Liens temporaires (1 h) pour les photos jointes aux réponses
+    const paths = (data || []).flatMap(r => r.photos || [])
+    if (paths.length > 0) {
+      const { data: signed } = await supabase.storage.from(PHOTO_BUCKET).createSignedUrls(paths, 3600)
+      const map = {}
+      ;(signed || []).forEach(s => { if (s.path && s.signedUrl) map[s.path] = s.signedUrl })
+      setReplyPhotoUrls(map)
+    }
+  }
+
+  function handleReplyPhotoChange(e) {
+    const files = Array.from(e.target.files || [])
+    e.target.value = ''
+    if (files.length === 0) return
+    const room = MAX_PHOTOS - replyPhotos.length
+    if (files.length > room) toast.error(`${MAX_PHOTOS} photos maximum par réponse`)
+    const accepted = files.filter(f => f.type.startsWith('image/')).slice(0, Math.max(room, 0))
+    setReplyPhotos(prev => [...prev, ...accepted.map(file => ({ file, preview: URL.createObjectURL(file) }))])
+  }
+
+  function removeReplyPhoto(index) {
+    setReplyPhotos(prev => {
+      URL.revokeObjectURL(prev[index].preview)
+      return prev.filter((_, i) => i !== index)
+    })
   }
 
   async function handleSendMessage(e) {
     e.preventDefault()
-    if (!message.trim()) return
+    if (!message.trim() && replyPhotos.length === 0) return
     setSending(true)
+
+    const photoPaths = []
+    try {
+      for (let i = 0; i < replyPhotos.length; i++) {
+        const blob = await compressImage(replyPhotos[i].file)
+        const path = `${demande.id}/reponses/${Date.now()}-${i}.jpg`
+        const { error: upErr } = await supabase.storage.from(PHOTO_BUCKET).upload(path, blob, { contentType: 'image/jpeg' })
+        if (upErr) throw upErr
+        photoPaths.push(path)
+      }
+    } catch (err) {
+      setSending(false)
+      return toast.error('Erreur lors de l\'envoi des photos : ' + (err.message || err))
+    }
+
     const { error } = await supabase.from('demande_reponses').insert({
       demande_id: demande.id,
       author_id: user.id,
-      message: message.trim(),
+      message: message.trim(), // peut être vide si la réponse ne contient que des photos
+      photos: photoPaths,
     })
     setSending(false)
     if (error) return toast.error('Erreur : ' + error.message)
+    replyPhotos.forEach(p => URL.revokeObjectURL(p.preview))
+    setReplyPhotos([])
     setMessage('')
     fetchReponses()
   }
@@ -485,6 +643,23 @@ function DemandeDetailModal({ demande, basePath, canValidate, canLinkToSearch, o
             </div>
           )}
 
+          {photoUrls.length > 0 && (
+            <div>
+              <label className="form-label">Photos ({photoUrls.length})</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '6px' }}>
+                {photoUrls.map((url, i) => (
+                  <a key={url} href={url} target="_blank" rel="noopener noreferrer" title="Ouvrir en grand">
+                    <img
+                      src={url}
+                      alt={`Photo ${i + 1}`}
+                      style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 'var(--radius-sm)', border: '1px solid var(--gray-200)' }}
+                    />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>
             Créée par {demande.created_by_user?.full_name || demande.created_by_user?.email || '—'} le{' '}
             {new Date(demande.created_at).toLocaleString('fr-FR')}
@@ -512,22 +687,68 @@ function DemandeDetailModal({ demande, basePath, canValidate, canLinkToSearch, o
                         {new Date(r.created_at).toLocaleString('fr-FR')}
                       </span>
                     </div>
-                    <p style={{ fontSize: '13px', color: 'var(--gray-700)', whiteSpace: 'pre-wrap' }}>{r.message}</p>
+                    {r.message && (
+                      <p style={{ fontSize: '13px', color: 'var(--gray-700)', whiteSpace: 'pre-wrap' }}>{r.message}</p>
+                    )}
+                    {(r.photos || []).length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: r.message ? 8 : 0 }}>
+                        {r.photos.map(path => replyPhotoUrls[path] ? (
+                          <a key={path} href={replyPhotoUrls[path]} target="_blank" rel="noopener noreferrer" title="Ouvrir en grand">
+                            <img
+                              src={replyPhotoUrls[path]}
+                              alt="Photo jointe"
+                              style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 'var(--radius-sm)', border: '1px solid var(--gray-200)' }}
+                            />
+                          </a>
+                        ) : (
+                          <div key={path} style={{ width: 72, height: 72, borderRadius: 'var(--radius-sm)', background: 'var(--gray-100)' }} />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             )}
 
-            <form onSubmit={handleSendMessage} style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-              <input
-                className="form-input"
-                placeholder="Écrire une réponse..."
-                value={message}
-                onChange={e => setMessage(e.target.value)}
-              />
-              <button type="submit" className="btn btn-secondary" disabled={sending || !message.trim()}>
-                <Send size={14} />
-              </button>
+            <form onSubmit={handleSendMessage} style={{ marginTop: '12px' }}>
+              {replyPhotos.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+                  {replyPhotos.map((p, i) => (
+                    <div key={p.preview} style={{ position: 'relative', width: 56, height: 56 }}>
+                      <img
+                        src={p.preview}
+                        alt={`Photo ${i + 1}`}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'var(--radius-sm)', border: '1px solid var(--gray-200)' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeReplyPhoto(i)}
+                        title="Retirer cette photo"
+                        style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: '50%', border: 'none', background: 'var(--gray-700)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  className="form-input"
+                  placeholder="Écrire une réponse..."
+                  value={message}
+                  onChange={e => setMessage(e.target.value)}
+                />
+                {replyPhotos.length < MAX_PHOTOS && (
+                  <label className="btn btn-secondary" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }} title="Joindre une photo">
+                    <Camera size={14} />
+                    <input type="file" accept="image/*" multiple onChange={handleReplyPhotoChange} style={{ display: 'none' }} />
+                  </label>
+                )}
+                <button type="submit" className="btn btn-secondary" disabled={sending || (!message.trim() && replyPhotos.length === 0)}>
+                  {sending ? <div className="spinner dark" /> : <Send size={14} />}
+                </button>
+              </div>
             </form>
           </div>
         </div>
