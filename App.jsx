@@ -21,6 +21,7 @@ import EmailRecipients from './EmailRecipients'
 import OperatorHome from './OperatorHome'
 import ScanPage from './ScanPage'
 import Demandes from './Demandes'
+import Defaillances from './Defaillances'
 import PartnerLayout from './PartnerLayout'
 
 // Détermine la route d'accueil selon le rôle du profil
@@ -73,6 +74,7 @@ export default function App() {
         <Route path="anomalies-preparation" element={<AnomaliesPreparation />} />
         <Route path="email-recipients" element={<EmailRecipients />} />
         <Route path="demandes" element={<Demandes />} />
+        <Route path="defaillances" element={<Defaillances />} />
         <Route path="scan/:tourId" element={<ScanPage />} />
       </Route>
 
@@ -87,6 +89,7 @@ export default function App() {
       {/* Partner routes — accès restreint au suivi des tâches et à la recherche colis */}
       <Route path="/partner" element={<PrivateRoute roles={['partner']}><PartnerLayout /></PrivateRoute>}>
         <Route index element={<Demandes />} />
+        <Route path="defaillances" element={<Defaillances />} />
         <Route path="search-parcel" element={<SearchParcel />} />
       </Route>
 
