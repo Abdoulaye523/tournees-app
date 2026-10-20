@@ -1,6 +1,6 @@
-import { Outlet, useNavigate } from 'react-router-dom'
+import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from './AuthContext'
-import { LogOut, ClipboardList } from 'lucide-react'
+import { LogOut, ClipboardList, AlertTriangle } from 'lucide-react'
 
 export default function PartnerLayout() {
   const { profile, signOut } = useAuth()
@@ -27,10 +27,14 @@ export default function PartnerLayout() {
 
         <nav className="sidebar-nav">
           <span className="sidebar-section-label">Suivi</span>
-          <div className="nav-item active">
+          <NavLink to="/partner" end className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
             <ClipboardList size={16} />
             Suivi des tâches
-          </div>
+          </NavLink>
+          <NavLink to="/partner/defaillances" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
+            <AlertTriangle size={16} />
+            Défaillances
+          </NavLink>
         </nav>
 
         <div className="sidebar-footer">
