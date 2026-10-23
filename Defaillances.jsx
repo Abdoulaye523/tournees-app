@@ -48,7 +48,7 @@ export default function Defaillances() {
 
   const canCreate = true
   const canValidate = profile?.role === 'admin' || profile?.role === 'partner'
-  const canLinkToSearch = profile?.role !== 'partner'
+  const canLinkToSearch = false // les BP ne sont plus cliquables : simple texte à copier-coller
 
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -216,7 +216,7 @@ export default function Defaillances() {
                                   </code>
                                 </Link>
                               ) : (
-                                <code key={bp} style={{ fontFamily: 'monospace', fontSize: '12px', background: 'var(--gray-100)', padding: '2px 8px', borderRadius: '4px' }}>
+                                <code key={bp} onClick={e => e.stopPropagation()} style={{ userSelect: 'text', cursor: 'text', fontFamily: 'monospace', fontSize: '12px', background: 'var(--gray-100)', padding: '2px 8px', borderRadius: '4px' }}>
                                   {bp}
                                 </code>
                               ))}
