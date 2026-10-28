@@ -134,3 +134,28 @@ export function StoredFile({ path, url, size = 96 }) {
     </a>
   )
 }
+
+// Jours ouvrés (hors samedi et dimanche) écoulés entre deux dates.
+// Une demande émise lundi et vue lundi = 0 ; vue mardi = 1 ; émise vendredi et vue lundi = 1.
+export function workingDaysBetween(start, end = new Date()) {
+  const d = new Date(start); d.setHours(0, 0, 0, 0)
+  const e = new Date(end); e.setHours(0, 0, 0, 0)
+  let n = 0
+  while (d < e) {
+    d.setDate(d.getDate() + 1)
+    const day = d.getDay()
+    if (day !== 0 && day !== 6) n++
+  }
+  return n
+}
+
+// Âge d'une demande/défaillance : figé à la date de traitement une fois qu'elle n'est plus ouverte
+export function ageInWorkingDays(item) {
+  const end = item.status && item.status !== 'ouverte' && item.resolved_at ? item.resolved_at : new Date()
+  return workingDaysBetween(item.created_at, end)
+}
+
+export function ageLabel(item) {
+  const n = ageInWorkingDays(item)
+  return `${n} jour${n > 1 ? 's' : ''} ouvré${n > 1 ? 's' : ''}`
+}
