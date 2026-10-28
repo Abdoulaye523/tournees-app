@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { supabase } from './supabase'
-import { MAX_FILES, acceptFiles, makePending, uploadAttachment, PendingFile, StoredFile } from './attachments'
+import { ageLabel, ageInWorkingDays, MAX_FILES, acceptFiles, makePending, uploadAttachment, PendingFile, StoredFile } from './attachments'
 import { useAuth } from './AuthContext'
 import toast from 'react-hot-toast'
 import {
@@ -184,6 +184,7 @@ export default function Defaillances() {
                     <th>Statut</th>
                     <th>Signalée par</th>
                     <th>Date</th>
+                    <th title="Jours écoulés depuis l'émission, week-ends exclus">Ancienneté</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -241,6 +242,7 @@ export default function Defaillances() {
                         <td><span className={`badge ${st.badge}`}>{st.label}</span></td>
                         <td style={{ fontSize: '13px' }}>{d.created_by_user?.full_name || d.created_by_user?.email || '—'}</td>
                         <td style={{ fontSize: '13px', color: 'var(--gray-500)' }}>{new Date(d.created_at).toLocaleString('fr-FR')}</td>
+                        <td style={{ fontSize: '13px', whiteSpace: 'nowrap', fontWeight: 600, color: ageInWorkingDays(d) >= 5 && d.status === 'ouverte' ? 'var(--red)' : 'var(--gray-600)' }}>{ageInWorkingDays(d)} j</td>
                         <td style={{ color: 'var(--gray-300)' }}>›</td>
                       </tr>
                     )
@@ -680,7 +682,7 @@ function DefaillanceDetailModal({ defaillance, basePath, canValidate, canLinkToS
 
           <div style={{ fontSize: '12px', color: 'var(--gray-400)' }}>
             Signalée par {defaillance.created_by_user?.full_name || defaillance.created_by_user?.email || '—'} le{' '}
-            {new Date(defaillance.created_at).toLocaleString('fr-FR')}
+            {new Date(defaillance.created_at).toLocaleString('fr-FR')} ({ageLabel({ ...defaillance, status })})
             {status !== 'ouverte' && defaillance.resolved_at && (
               <> · {STATUS_META[status]?.label || 'Mise à jour'} par {defaillance.resolved_by_user?.full_name || defaillance.resolved_by_user?.email || '—'} le {new Date(defaillance.resolved_at).toLocaleString('fr-FR')}</>
             )}
@@ -723,9 +725,11 @@ function DefaillanceDetailModal({ defaillance, basePath, canValidate, canLinkToS
                 </div>
               )}
               <div style={{ display: 'flex', gap: '8px' }}>
-                <input
+                <textarea
                   className="form-input"
-                  placeholder="Écrire une réponse..."
+                  placeholder="Écrire une réponse... (Entrée = retour à la ligne)"
+                  rows={2}
+                  style={{ resize: 'vertical', minHeight: 40 }}
                   value={message}
                   onChange={e => setMessage(e.target.value)}
                 />
