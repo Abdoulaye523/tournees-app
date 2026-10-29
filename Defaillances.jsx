@@ -27,6 +27,7 @@ const PROCESSUS = [
   'Retour entrant',
   'Retour sortant',
   'Sécurité (ex : port des EPI)',
+  'Sécurisation',
   'Rotation des bennes',
   'Administratif',
   'Autre',
