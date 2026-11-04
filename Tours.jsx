@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from './supabase'
 import { Truck, Archive, RotateCcw, ScanLine, ChevronDown, ChevronUp, AlertTriangle, Package, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { getChecklistStatus } from './checklistItems'
 
 export default function Tours() {
   const navigate = useNavigate()
@@ -66,6 +67,18 @@ export default function Tours() {
   }
 
   async function validateControl(date, dateTours) {
+    // La checklist de la journée doit être complète avant de valider (et d'envoyer le rapport)
+    try {
+      const status = await getChecklistStatus(date)
+      if (!status.complete) {
+        toast.error(`Checklist incomplète (${status.done}/${status.total}) : il reste ${status.missing.length} point(s) à cocher.`)
+        navigate(`/admin/checklist?date=${date}`)
+        return
+      }
+    } catch (err) {
+      return toast.error('Checklist indisponible : ' + err.message)
+    }
+
     if (!confirm(`Valider le contrôle du ${new Date(date + 'T12:00:00').toLocaleDateString('fr-FR')} ?\nLes colis non scannés seront marqués "Non réceptionné" et les tournées seront clôturées.`)) return
 
     setValidatingDate(date)
