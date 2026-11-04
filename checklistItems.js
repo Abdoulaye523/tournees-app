@@ -17,6 +17,7 @@ export const CHECKLIST_ITEMS = [
   { key: 'manquants_feuilles', label: 'Écrire les manquants sur les feuilles de tournées' },
   { key: 'diables', label: 'Rangement des 4 diables bleus sur la ligne 2-3' },
   { key: 'transpalettes', label: 'Rangement et mise en charge des transpalettes électriques' },
+  { key: 'pda', label: 'Mise en charge des PDA' },
   { key: 'proprete_bennes', label: 'Vérification de la propreté devant les bennes' },
   { key: 'compacteur', label: 'Éteindre le compacteur' },
 ]
