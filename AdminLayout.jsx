@@ -79,6 +79,7 @@ export default function AdminLayout() {
         <div className="sidebar-logo">
           <div>
             <h1>Superflash</h1>
+            <p style={{ fontWeight: 600, color: 'rgba(255,255,255,0.7)' }}>Meilleure plateforme de France pour une bonne raison</p>
             <p>Un outil DONEO pour être meilleur que le Blanc Mesnil</p>
           </div>
           <button className="sidebar-close" onClick={closeSidebar}>
