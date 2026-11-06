@@ -6,6 +6,9 @@ import toast from 'react-hot-toast'
 import { CheckCircle2, ListChecks, ExternalLink } from 'lucide-react'
 import { CHECKLIST_ITEMS } from './checklistItems'
 
+// Date du jour en heure locale (et non UTC, qui décale la journée autour de minuit)
+const localToday = () => new Date().toLocaleDateString('en-CA')
+
 const fmtDate = d => new Date(d + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
 
 export default function Checklist() {
@@ -25,14 +28,14 @@ export default function Checklist() {
     const { data, error } = await supabase
       .from('delivery_dates')
       .select('id, delivery_date')
+      .lte('delivery_date', localToday()) // jamais la journée du lendemain
       .order('delivery_date', { ascending: false })
       .limit(30)
     if (error) { toast.error('Erreur de chargement : ' + error.message); setLoading(false); return }
     setDates(data || [])
     if (!date && data?.length) {
-      const today = new Date().toISOString().split('T')[0]
-      // journée du jour si elle existe, sinon la plus récente
-      setDate((data.find(d => d.delivery_date <= today) || data[0]).delivery_date)
+      // journée du jour si elle existe, sinon la plus récente avant aujourd'hui
+      setDate(data[0].delivery_date)
     }
     if (!data?.length) setLoading(false)
   }
