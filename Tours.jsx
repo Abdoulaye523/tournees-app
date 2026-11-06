@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from './supabase'
 import { Truck, Archive, RotateCcw, ScanLine, ChevronDown, ChevronUp, AlertTriangle, Package, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { getChecklistStatus } from './checklistItems'
+import { getChecklistStatus, localToday } from './checklistItems'
 
 export default function Tours() {
   const navigate = useNavigate()
@@ -67,12 +67,12 @@ export default function Tours() {
   }
 
   async function validateControl(date, dateTours) {
-    // La checklist de la journée doit être complète avant de valider (et d'envoyer le rapport)
+    // La checklist du jour doit être complète avant de valider le contrôle et d'envoyer le rapport
     try {
-      const status = await getChecklistStatus(date)
+      const status = await getChecklistStatus(localToday())
       if (!status.complete) {
-        toast.error(`Checklist incomplète (${status.done}/${status.total}) : il reste ${status.missing.length} point(s) à cocher.`)
-        navigate(`/admin/checklist?date=${date}`)
+        toast.error(`Checklist du jour incomplète (${status.done}/${status.total}) : il reste ${status.missing.length} point(s) à cocher avant l'envoi du rapport.`)
+        navigate('/admin/checklist')
         return
       }
     } catch (err) {
