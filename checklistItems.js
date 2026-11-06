@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 
-// Éléments à cocher avant de valider le contrôle d'une journée (et d'envoyer le rapport par email).
+// Tâches de fin de journée, à cocher chaque jour. L'envoi du rapport par email n'est possible que lorsque
+// la checklist du jour est complète.
 // - auto : coché automatiquement (pas de case à cocher manuelle)
 // - link : raccourci vers la page concernée
 export const CHECKLIST_ITEMS = [
@@ -22,19 +23,22 @@ export const CHECKLIST_ITEMS = [
   { key: 'compacteur', label: 'Éteindre le compacteur' },
 ]
 
-// Résumé de la checklist d'une date de livraison ('YYYY-MM-DD')
+// Date du jour en heure locale ('YYYY-MM-DD') : la checklist est une liste de tâches de fin de journée
+export const localToday = () => new Date().toLocaleDateString('en-CA')
+
+// Résumé de la checklist d'un jour ('YYYY-MM-DD'), indépendante des dates de livraison
 export async function getChecklistStatus(date) {
   const manual = CHECKLIST_ITEMS.filter(i => !i.auto)
   const { data, error } = await supabase
     .from('checklist_checks')
     .select('item_key')
-    .eq('delivery_date', date)
+    .eq('delivery_date', date) // colonne historique : contient ici le jour de la checklist
   if (error) throw error
   const checked = new Set((data || []).map(r => r.item_key))
   const missing = manual.filter(i => !checked.has(i.key))
   return {
     total: CHECKLIST_ITEMS.length,
-    done: CHECKLIST_ITEMS.length - missing.length, // l'import est forcément fait si des tournées existent
+    done: CHECKLIST_ITEMS.length - missing.length, // le point « import PDF » est automatique et ne bloque pas
     missing,
     complete: missing.length === 0,
   }
