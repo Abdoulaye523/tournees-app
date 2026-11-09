@@ -23,6 +23,7 @@ import ScanPage from './ScanPage'
 import Demandes from './Demandes'
 import Defaillances from './Defaillances'
 import Checklist from './Checklist'
+import PlanChargement from './PlanChargement'
 import PartnerLayout from './PartnerLayout'
 
 // Détermine la route d'accueil selon le rôle du profil
@@ -75,6 +76,7 @@ export default function App() {
         <Route path="anomalies-preparation" element={<AnomaliesPreparation />} />
         <Route path="email-recipients" element={<EmailRecipients />} />
         <Route path="checklist" element={<Checklist />} />
+        <Route path="plan-chargement" element={<PlanChargement />} />
         <Route path="demandes" element={<Demandes />} />
         <Route path="defaillances" element={<Defaillances />} />
         <Route path="scan/:tourId" element={<ScanPage />} />
