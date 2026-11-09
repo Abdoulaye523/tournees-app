@@ -3,6 +3,7 @@ import { supabase } from './supabase'
 import { useAuth } from './AuthContext'
 import { Upload, FileText, CheckCircle, AlertCircle, X, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
+import BackfillCodesPostaux from './BackfillCodesPostaux'
 
 function loadPdfJs() {
   return new Promise((resolve, reject) => {
@@ -23,7 +24,7 @@ function loadPdfJs() {
   })
 }
 
-async function extractTextFromPDF(file) {
+export async function extractTextFromPDF(file) {
   const pdfjsLib = await loadPdfJs()
   const arrayBuffer = await file.arrayBuffer()
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
@@ -64,7 +65,20 @@ function removeAccents(str) {
   return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
 }
 
-function parsePDFText(text) {
+// Code postal (5 chiffres suivis de la ville) dans l'adresse du client, juste sous la ligne « nom / type / code-barres »
+function extractPostalCode(...candidateLines) {
+  for (const raw of candidateLines) {
+    const l = (raw || '').trim()
+    if (!l) break
+    // fin du bloc adresse : téléphone, cases à cocher, type de prestation...
+    if (/^(q\s|Type\s+prestation|Référence|Créneau|Quantité)/i.test(l) || /^[+\d][\d\s/+]*$/.test(l)) break
+    const all = [...l.matchAll(/\b(\d{5})\b(?=\s+[A-Za-zÀ-ÿ])/g)]
+    if (all.length > 0) return all[all.length - 1][1]
+  }
+  return null
+}
+
+export function parsePDFText(text) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
   const tours = {}
   const seenTours = new Set()
@@ -108,7 +122,7 @@ function parsePDFText(text) {
       if (seenTours.has(name)) { skip = true; currentTourName = null; inChargement = false }
       else {
         seenTours.add(name); currentTourName = name; skip = false; inChargement = false
-        if (!tours[name]) tours[name] = { name, parcels: [], excluded: [], typeLivraison: null, heurePremiereLivraison: null, tourDate: currentDate }
+        if (!tours[name]) tours[name] = { name, parcels: [], excluded: [], typeLivraison: null, heurePremiereLivraison: null, codePostalPremiereLivraison: null, tourDate: currentDate }
       }
       continue
     }
@@ -126,7 +140,7 @@ function parsePDFText(text) {
       if (seenTours.has(name)) { skip = true; currentTourName = null; inChargement = false }
       else {
         seenTours.add(name); currentTourName = name; skip = false; inChargement = false
-        if (!tours[name]) tours[name] = { name, parcels: [], excluded: [], typeLivraison: null, heurePremiereLivraison: null, tourDate: currentDate }
+        if (!tours[name]) tours[name] = { name, parcels: [], excluded: [], typeLivraison: null, heurePremiereLivraison: null, codePostalPremiereLivraison: null, tourDate: currentDate }
       }
       continue
     }
@@ -162,7 +176,11 @@ function parsePDFText(text) {
     const lvMatch = line.match(/LV([123])_/)
     if (lvMatch && currentTourName) {
       const t = tours[currentTourName]
-      if (t && !t.typeLivraison) t.typeLivraison = 'LV' + lvMatch[1]
+      if (t && !t.typeLivraison) {
+        t.typeLivraison = 'LV' + lvMatch[1]
+        // première livraison de la tournée : code postal de l'adresse qui suit
+        t.codePostalPremiereLivraison = extractPostalCode(lines[i + 1], lines[i + 2])
+      }
     }
 
     const isDea = line.includes('DEA_ENLEVEMENT')
@@ -182,7 +200,7 @@ function parsePDFText(text) {
   return { tours: Object.values(tours).filter(t => t.parcels.length > 0 || t.excluded.length > 0), pdfDate: pdfDateDetected }
 }
 
-function matchTourName(rawName, referenceList) {
+export function matchTourName(rawName, referenceList) {
   const normalizedRaw = normalize(rawName)
   const found = [...referenceList]
     .sort((a, b) => b.name.length - a.name.length)
@@ -267,7 +285,7 @@ export default function UploadPDF() {
       for (const tour of parsedTours) {
         const res = matchTourName(tour.name, referenceList || [])
         if (res.matched) matched.push({ ...tour, finalName: res.officialName, referenceId: res.referenceId })
-        else unmatched.push({ rawName: tour.name, manualName: '', parcels: tour.parcels, excluded: tour.excluded, typeLivraison: tour.typeLivraison, heurePremiereLivraison: tour.heurePremiereLivraison })
+        else unmatched.push({ rawName: tour.name, manualName: '', parcels: tour.parcels, excluded: tour.excluded, typeLivraison: tour.typeLivraison, heurePremiereLivraison: tour.heurePremiereLivraison, codePostalPremiereLivraison: tour.codePostalPremiereLivraison })
       }
 
       if (unmatched.length > 0) {
@@ -303,7 +321,7 @@ export default function UploadPDF() {
           .from('tours_references')
           .upsert({ name: finalName }, { onConflict: 'name' })
           .select('id').single()
-        resolvedTours.push({ name: t.rawName, finalName, referenceId: refData?.id || null, parcels: t.parcels, excluded: t.excluded, typeLivraison: t.typeLivraison, heurePremiereLivraison: t.heurePremiereLivraison })
+        resolvedTours.push({ name: t.rawName, finalName, referenceId: refData?.id || null, parcels: t.parcels, excluded: t.excluded, typeLivraison: t.typeLivraison, heurePremiereLivraison: t.heurePremiereLivraison, codePostalPremiereLivraison: t.codePostalPremiereLivraison })
       }
       const allTours = [...(pendingData.matched || []), ...resolvedTours]
       await insertTours(allTours, pendingData.dateData, pendingData.uploadRecord, pendingData.finalDate)
@@ -350,6 +368,7 @@ export default function UploadPDF() {
           reference_id: tour.referenceId || null,
           type_livraison: tour.typeLivraison || null,
           heure_premiere_livraison: tour.heurePremiereLivraison || null,
+          code_postal_premiere_livraison: tour.codePostalPremiereLivraison || null,
         }, { onConflict: 'reference_id,delivery_date_id' })
         .select().single()
 
@@ -506,6 +525,8 @@ export default function UploadPDF() {
             )}
           </div>
         </div>
+
+        <BackfillCodesPostaux />
       </div>
     </>
   )
