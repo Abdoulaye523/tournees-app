@@ -2,7 +2,7 @@ import { Fragment, useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from './AuthContext'
 import {
-  LayoutDashboard, Truck, Upload, Users, Search, FileSearch, RotateCcw, LogOut, Menu, X, BookMarked, ClipboardList, Map, Activity, ShieldAlert, MailIcon, PackageX, ClipboardCheck, MessageSquarePlus, AlertTriangle, ListChecks
+  LayoutDashboard, Truck, Upload, Users, Search, FileSearch, RotateCcw, LogOut, Menu, X, BookMarked, ClipboardList, Map, Activity, ShieldAlert, MailIcon, PackageX, ClipboardCheck, MessageSquarePlus, AlertTriangle, ListChecks, LayoutGrid
 } from 'lucide-react'
 
 // Menu regroupé par section (le Dashboard est seul, en haut)
@@ -25,6 +25,7 @@ const navSections = [
     items: [
       { to: '/admin/upload', label: 'Importer un PDF', icon: <Upload size={16} /> },
       { to: '/admin/preparation-tournees', label: 'Préparation des tournées', icon: <ClipboardList size={16} /> },
+      { to: '/admin/plan-chargement', label: 'Plan de chargement', icon: <LayoutGrid size={16} /> },
       { to: '/admin/warehouse', label: 'Plan entrepôt', icon: <Map size={16} /> },
       { to: '/admin/anomalies-preparation', label: 'Anomalies préparation', icon: <PackageX size={16} /> },
       { to: '/admin/reprises', label: 'Reprises', icon: <RotateCcw size={16} /> },
