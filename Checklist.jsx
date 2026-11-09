@@ -4,7 +4,7 @@ import { supabase } from './supabase'
 import { useAuth } from './AuthContext'
 import toast from 'react-hot-toast'
 import { CheckCircle2, ExternalLink } from 'lucide-react'
-import { CHECKLIST_ITEMS, localToday } from './checklistItems'
+import { CHECKLIST_ITEMS, localToday, getNextPreparation } from './checklistItems'
 
 const fmtDate = d => new Date(d + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
 
@@ -14,7 +14,7 @@ export default function Checklist() {
   const today = localToday()
   const date = searchParams.get('date') && searchParams.get('date') <= today ? searchParams.get('date') : today
   const [checks, setChecks] = useState({}) // key -> { at, who }
-  const [importDone, setImportDone] = useState(false)
+  const [prep, setPrep] = useState(null) // préparation du prochain jour de livraison
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(null)
 
@@ -33,15 +33,8 @@ export default function Checklist() {
     })
     setChecks(map)
 
-    // Point automatique : un PDF de tournées a été importé ce jour-là
-    const start = new Date(d + 'T00:00:00')
-    const end = new Date(start); end.setDate(end.getDate() + 1)
-    const { count, error: upErr } = await supabase
-      .from('pdf_uploads')
-      .select('id', { count: 'exact', head: true })
-      .gte('created_at', start.toISOString())
-      .lt('created_at', end.toISOString())
-    setImportDone(!upErr && (count || 0) > 0)
+    // Point automatique : une préparation existe pour le prochain jour de livraison (J+1, ou J+3 avant un week-end)
+    try { setPrep(await getNextPreparation(d)) } catch { setPrep(null) }
     setLoading(false)
   }
 
@@ -61,7 +54,7 @@ export default function Checklist() {
     loadChecks(date)
   }
 
-  const isDone = item => item.auto ? importDone : !!checks[item.key]
+  const isDone = item => item.auto ? !!prep : !!checks[item.key]
   const doneCount = CHECKLIST_ITEMS.filter(isDone).length
   const total = CHECKLIST_ITEMS.length
   const complete = doneCount === total
@@ -120,7 +113,7 @@ export default function Checklist() {
                       </div>
                       {item.auto && (
                         <div style={{ fontSize: 12, color: 'var(--gray-400)', marginTop: 2 }}>
-                          {importDone ? 'Coché automatiquement : un PDF de tournées a été importé ce jour.' : 'Se coche automatiquement dès qu\'un PDF est importé.'}
+                          {prep ? `Coché automatiquement : préparation trouvée pour ${fmtDate(prep.date)} (${prep.tours} tournées).` : 'Se coche automatiquement dès que le PDF du prochain jour de livraison est importé.'}
                         </div>
                       )}
                       {meta && (
