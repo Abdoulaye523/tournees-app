@@ -5,7 +5,7 @@ import { supabase } from './supabase'
 // - auto : coché automatiquement (pas de case à cocher manuelle)
 // - link : raccourci vers la page concernée
 export const CHECKLIST_ITEMS = [
-  { key: 'import_pdf', label: 'Importer le PDF avec les tournées', auto: true, link: '/admin/upload' },
+  { key: 'import_pdf', label: 'Importer le PDF avec les tournées (préparation du prochain jour de livraison)', auto: true, link: '/admin/upload' },
   { key: 'impression', label: 'Impression des feuilles de tournées' },
   { key: 'agrafage', label: 'Agrafage des feuilles de tournées' },
   { key: 'suivi_retours', label: 'Mise à jour des retours de tournées (onglet « Suivi des tournées »)', link: '/admin/suivi-tournees' },
@@ -26,6 +26,25 @@ export const CHECKLIST_ITEMS = [
 // Date du jour en heure locale ('YYYY-MM-DD') : la checklist est une liste de tâches de fin de journée
 export const localToday = () => new Date().toLocaleDateString('en-CA')
 
+// Préparation du prochain jour de livraison : la préparation se fait le jour J pour un départ en J+1
+// (ou J+3 avant un week-end). On cherche la première journée de livraison APRÈS le jour J et ses tournées.
+export async function getNextPreparation(day) {
+  const { data: dd, error } = await supabase
+    .from('delivery_dates')
+    .select('id, delivery_date')
+    .gt('delivery_date', day)
+    .order('delivery_date', { ascending: true })
+    .limit(1)
+  if (error) throw error
+  if (!dd?.length) return null
+  const { count, error: e2 } = await supabase
+    .from('tours')
+    .select('id', { count: 'exact', head: true })
+    .eq('delivery_date_id', dd[0].id)
+  if (e2) throw e2
+  return (count || 0) > 0 ? { date: dd[0].delivery_date, tours: count } : null
+}
+
 // Résumé de la checklist d'un jour ('YYYY-MM-DD'), indépendante des dates de livraison
 export async function getChecklistStatus(date) {
   const manual = CHECKLIST_ITEMS.filter(i => !i.auto)
@@ -36,10 +55,13 @@ export async function getChecklistStatus(date) {
   if (error) throw error
   const checked = new Set((data || []).map(r => r.item_key))
   const missing = manual.filter(i => !checked.has(i.key))
+  const prep = await getNextPreparation(date)
+  if (!prep) missing.unshift(CHECKLIST_ITEMS.find(i => i.auto)) // le PDF du prochain jour n'est pas importé
   return {
     total: CHECKLIST_ITEMS.length,
-    done: CHECKLIST_ITEMS.length - missing.length, // le point « import PDF » est automatique et ne bloque pas
+    done: CHECKLIST_ITEMS.length - missing.length,
     missing,
     complete: missing.length === 0,
+    prep,
   }
 }
