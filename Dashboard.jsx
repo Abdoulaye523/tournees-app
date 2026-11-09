@@ -17,11 +17,12 @@ export default function Dashboard() {
 
   async function fetchData() {
     try {
-      const { data: tours } = await supabase
+      const { data: tours, error } = await supabase
         .from('tour_scan_summary')
         .select('*')
-        .eq('archived', false)
+        .or('archived.is.false,archived.is.null')
         .order('delivery_date', { ascending: true })
+      if (error) console.error('Dashboard error:', error)
 
       // Calculer les stats depuis les tournées non archivées
       const allTours = tours || []
