@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './supabase'
-import { Truck, AlertTriangle, CheckCircle, RefreshCw, Clock } from 'lucide-react'
+import { Truck, AlertTriangle, CheckCircle, RefreshCw, Clock, MapPin } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function SuiviTournees() {
@@ -24,7 +24,7 @@ export default function SuiviTournees() {
 
     const { data } = await supabase
       .from('tours')
-      .select('id, name, status, retard, heure_retour, reference_id, type_livraison, heure_premiere_livraison, tours_references(name)')
+      .select('id, name, status, retard, heure_retour, reference_id, type_livraison, heure_premiere_livraison, code_postal_premiere_livraison, tours_references(name)')
       .eq('delivery_date_id', dateData.id)
       .is('heure_retour', null)
       .order('heure_premiere_livraison', { ascending: true, nullsFirst: false })
@@ -123,6 +123,11 @@ export default function SuiviTournees() {
                         {t.heure_premiere_livraison && (
                           <span style={{ fontSize: 11, color: 'var(--gray-500)', display: 'flex', alignItems: 'center', gap: 3 }}>
                             <Clock size={11} /> {t.heure_premiere_livraison}
+                          </span>
+                        )}
+                        {t.code_postal_premiere_livraison && (
+                          <span title="Code postal de la première livraison" style={{ fontSize: 11, color: 'var(--gray-500)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                            <MapPin size={11} /> {t.code_postal_premiere_livraison}
                           </span>
                         )}
                       </div>
